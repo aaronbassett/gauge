@@ -76,7 +76,19 @@ async fn main() {
             }
             .await
         }
-        Cmd::Query { request } => todo_stub("query", &request),
+        Cmd::Query { request } => {
+            async {
+                let cfg = gauge::config::ClientConfig::load()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let api = gauge::api::ApiClient::from_config(&cfg);
+                let out = gauge::query_cmd::run(&api, &request)
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                println!("{out}");
+                Ok(())
+            }
+            .await
+        }
         Cmd::Tui => todo_stub("tui", ""),
         Cmd::Mcp { cmd: McpCmd::Serve } => todo_stub("mcp serve", ""),
     };
