@@ -44,9 +44,9 @@
 - [x] Task 10 — gauge-query: query DSL types (PR #4)
 - [x] Task 11 — gauge-server: scaffold (PR #5)
 - [x] Task 12 — gauge-server: events migration + batch insert (PR #5)
-- [ ] Task 13 — gauge-server: OTLP ingest endpoint
-- [ ] Task 14 — gauge-server: auth endpoints
-- [ ] Task 15 — gauge-server: bearer middleware
+- [x] Task 13 — gauge-server: OTLP ingest endpoint (PR #6)
+- [x] Task 14 — gauge-server: auth endpoints (PR #6)
+- [x] Task 15 — gauge-server: bearer middleware (PR #6)
 - [ ] Task 16 — gauge-server: query SQL builder
 - [ ] Task 17 — gauge-server: POST /v1/query
 - [ ] Task 18 — gauge-server: GET /v1/meta
