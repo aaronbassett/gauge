@@ -14,14 +14,23 @@ async fn probe(Extension(ctx): Extension<AuthContext>) -> String {
 fn probe_router(state: gauge_server::state::AppState) -> Router {
     Router::new()
         .route("/probe", get(probe))
-        .layer(middleware::from_fn_with_state(state.clone(), require_bearer))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ))
         .with_state(state)
 }
 
 #[sqlx::test]
 async fn valid_token_passes_and_injects_context(pool: PgPool) {
     let (state, _kp) = common::test_state(pool);
-    let (token, _) = mint_token(&state.secret, "alice", Role::Admin, time::OffsetDateTime::now_utc()).unwrap();
+    let (token, _) = mint_token(
+        &state.secret,
+        "alice",
+        Role::Admin,
+        time::OffsetDateTime::now_utc(),
+    )
+    .unwrap();
     let app = probe_router(state);
     let (status, body) = common::send_json(&app, "GET", "/probe", None, Some(&token)).await;
     assert_eq!(status, StatusCode::OK);

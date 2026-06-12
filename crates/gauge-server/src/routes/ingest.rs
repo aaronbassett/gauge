@@ -1,7 +1,9 @@
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
-use gauge_events::otlp::{ExportLogsPartialSuccess, ExportLogsServiceRequest, ExportLogsServiceResponse};
+use gauge_events::otlp::{
+    ExportLogsPartialSuccess, ExportLogsServiceRequest, ExportLogsServiceResponse,
+};
 use gauge_events::profile::validate_batch;
 
 use crate::db;
@@ -14,8 +16,12 @@ pub async fn ingest(
     State(st): State<AppState>,
     body: Bytes,
 ) -> Result<Json<ExportLogsServiceResponse>, ApiError> {
-    let req: ExportLogsServiceRequest = serde_json::from_slice(&body)
-        .map_err(|_| ApiError::bad_request("invalid_otlp", "request body is not valid OTLP/HTTP JSON (logs signal)"))?;
+    let req: ExportLogsServiceRequest = serde_json::from_slice(&body).map_err(|_| {
+        ApiError::bad_request(
+            "invalid_otlp",
+            "request body is not valid OTLP/HTTP JSON (logs signal)",
+        )
+    })?;
 
     let batch = validate_batch(&req, &st.allowlist)
         .map_err(|e| ApiError::bad_request("invalid_batch", e.to_string()))?;
@@ -25,7 +31,10 @@ pub async fn ingest(
             .await
             .map_err(|e| {
                 tracing::error!(kind = %e.to_string(), "ingest insert failed");
-                ApiError::service_unavailable("db_unavailable", "could not persist events; retry later")
+                ApiError::service_unavailable(
+                    "db_unavailable",
+                    "could not persist events; retry later",
+                )
             })?;
     }
 
