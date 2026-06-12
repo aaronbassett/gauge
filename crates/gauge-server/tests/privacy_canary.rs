@@ -20,8 +20,17 @@ async fn events_schema_has_exactly_the_spec_columns(pool: PgPool) {
     assert_eq!(
         cols,
         vec![
-            "app", "app_version", "arch", "attributes", "event_name", "id",
-            "install_id", "os", "received_at", "session_id", "time",
+            "app",
+            "app_version",
+            "arch",
+            "attributes",
+            "event_name",
+            "id",
+            "install_id",
+            "os",
+            "received_at",
+            "session_id",
+            "time",
         ],
         "events table columns drifted from the spec — privacy review required"
     );
@@ -62,8 +71,10 @@ async fn ingest_path_never_logs_attribute_values(pool: PgPool) {
 
     let (state, _kp) = common::test_state(pool);
     let app = build_router(state);
-    let mut body: serde_json::Value =
-        serde_json::from_str(include_str!("../../gauge-events/tests/fixtures/valid_batch.json")).unwrap();
+    let mut body: serde_json::Value = serde_json::from_str(include_str!(
+        "../../gauge-events/tests/fixtures/valid_batch.json"
+    ))
+    .unwrap();
     body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["attributes"][1]["value"]["stringValue"] =
         CANARY.into();
     let (status, _) = common::send_json(&app, "POST", "/v1/logs", Some(body), None).await;

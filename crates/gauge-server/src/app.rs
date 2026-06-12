@@ -12,16 +12,28 @@ pub fn build_router(state: AppState) -> Router {
     let ingest = Router::new()
         .route("/v1/logs", post(routes::ingest::ingest))
         .layer(DefaultBodyLimit::max(gauge_events::profile::MAX_BODY_BYTES))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::middleware::rate_limit::limit_logs));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rate_limit::limit_logs,
+        ));
     let auth = Router::new()
         .route("/v1/auth/challenge", post(routes::auth::challenge))
         .route("/v1/auth/verify", post(routes::auth::verify))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::middleware::rate_limit::limit_auth));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rate_limit::limit_auth,
+        ));
     let protected = Router::new()
         .route("/v1/query", post(routes::query::query))
         .route("/v1/meta", get(routes::meta::meta))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::middleware::rate_limit::limit_user))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), crate::middleware::bearer::require_bearer));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::rate_limit::limit_user,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::bearer::require_bearer,
+        ));
     public
         .merge(ingest)
         .merge(auth)

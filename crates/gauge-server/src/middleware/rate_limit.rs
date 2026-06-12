@@ -88,14 +88,22 @@ fn too_many(retry_after: u64) -> Response {
 }
 
 pub async fn limit_logs(State(st): State<AppState>, req: Request, next: Next) -> Response {
-    match st.limiters.logs.check(client_ip(req.headers()), Instant::now()) {
+    match st
+        .limiters
+        .logs
+        .check(client_ip(req.headers()), Instant::now())
+    {
         Ok(()) => next.run(req).await,
         Err(r) => too_many(r),
     }
 }
 
 pub async fn limit_auth(State(st): State<AppState>, req: Request, next: Next) -> Response {
-    match st.limiters.auth.check(client_ip(req.headers()), Instant::now()) {
+    match st
+        .limiters
+        .auth
+        .check(client_ip(req.headers()), Instant::now())
+    {
         Ok(()) => next.run(req).await,
         Err(r) => too_many(r),
     }
