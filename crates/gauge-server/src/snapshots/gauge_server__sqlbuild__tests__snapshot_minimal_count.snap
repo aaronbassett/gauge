@@ -1,0 +1,5 @@
+---
+source: crates/gauge-server/src/sqlbuild.rs
+expression: "build(&req, NOW).unwrap().sql"
+---
+SELECT COUNT(*) AS "count" FROM events WHERE time >= $1 AND time < $2 LIMIT 1001
