@@ -42,8 +42,8 @@
 - [x] Task 8 — gauge-events: Gauge profile validation (PR #3)
 - [x] Task 9 — gauge-events: SPEC.md + pin test (PR #3)
 - [x] Task 10 — gauge-query: query DSL types (PR #4)
-- [ ] Task 11 — gauge-server: scaffold
-- [ ] Task 12 — gauge-server: events migration + batch insert
+- [x] Task 11 — gauge-server: scaffold (PR #5)
+- [x] Task 12 — gauge-server: events migration + batch insert (PR #5)
 - [ ] Task 13 — gauge-server: OTLP ingest endpoint
 - [ ] Task 14 — gauge-server: auth endpoints
 - [ ] Task 15 — gauge-server: bearer middleware
