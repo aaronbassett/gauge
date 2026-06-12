@@ -33,6 +33,12 @@ pub struct App {
     pub refresh_requested: bool,
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl App {
     pub fn new() -> Self {
         Self {

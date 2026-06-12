@@ -1,17 +1,18 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use gauge::tui::data::{TimeWindow, fetch};
+use tokio::sync::{Mutex, MutexGuard};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+async fn env_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    LOCK.get_or_init(|| Mutex::new(())).lock().await
 }
 
 #[tokio::test]
 async fn fetch_assembles_snapshot_from_query_and_meta() {
-    let _g = env_lock();
+    let _g = env_lock().await;
     let tmp = tempfile::tempdir().unwrap();
     unsafe { std::env::set_var("GAUGE_CONFIG_DIR", tmp.path()) };
     gauge::keys::generate("alice").unwrap();
