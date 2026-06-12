@@ -68,9 +68,9 @@
 - [x] Task 22 — gauge: CLI scaffold, paths, config, error (PR #10)
 - [x] Task 23 — gauge: keys generate (PR #10)
 - [x] Task 24 — gauge: ApiClient (login, token cache, 401 retry) (PR #10)
-- [ ] Task 25 — gauge: query one-shot command
-- [ ] Task 26 — gauge: MCP tool query builders (pure)
-- [ ] Task 27 — gauge: MCP server (rmcp, stdio)
+- [x] Task 25 — gauge: query one-shot command (PR #11)
+- [x] Task 26 — gauge: MCP tool query builders (pure) (PR #11)
+- [x] Task 27 — gauge: MCP server (rmcp 1.7.0, stdio) (PR #11)
 - [ ] Task 28 — gauge: TUI data layer
 - [ ] Task 29 — gauge: TUI app state + rendering
 - [ ] Task 30 — gauge: TUI event loop + wiring
