@@ -54,3 +54,14 @@ async fn garbage_token_is_401(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["code"], "invalid_token");
 }
+
+#[sqlx::test]
+async fn empty_bearer_token_is_401(pool: PgPool) {
+    // `Authorization: Bearer ` (prefix present, empty token) must not bypass the
+    // guard: strip_prefix yields "", which is not a valid JWT.
+    let (state, _kp) = common::test_state(pool);
+    let app = probe_router(state);
+    let (status, body) = common::send_json(&app, "GET", "/probe", None, Some("")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "invalid_token");
+}
