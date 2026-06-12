@@ -33,11 +33,11 @@
 > One box per task/gate. Ticked when the task's PR is merged to `main`. This is the source of truth for resuming the loop after a crash.
 
 - [x] Task 1 — Workspace scaffolding + CI (PR #1, merged)
-- [ ] Task 2 — gauge-auth: error + wire format
-- [ ] Task 3 — gauge-auth: keypair
-- [ ] Task 4 — gauge-auth: user store
-- [ ] Task 5 — gauge-auth: challenge store
-- [ ] Task 6 — gauge-auth: JWT + protocol + client
+- [x] Task 2 — gauge-auth: error + wire format (PR #2)
+- [x] Task 3 — gauge-auth: keypair (PR #2)
+- [x] Task 4 — gauge-auth: user store (PR #2)
+- [x] Task 5 — gauge-auth: challenge store (PR #2)
+- [x] Task 6 — gauge-auth: JWT + protocol + client (PR #2)
 - [ ] Task 7 — gauge-events: OTLP wire types
 - [ ] Task 8 — gauge-events: Gauge profile validation
 - [ ] Task 9 — gauge-events: SPEC.md + pin test
