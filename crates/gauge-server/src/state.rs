@@ -4,6 +4,7 @@ use gauge_auth::{ChallengeStore, SigningSecret, UserStore};
 use sqlx::PgPool;
 
 use crate::config::Config;
+use crate::middleware::rate_limit::Limiters;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -12,6 +13,7 @@ pub struct AppState {
     pub users: Arc<UserStore>,
     pub challenges: Arc<ChallengeStore>,
     pub secret: Arc<SigningSecret>,
+    pub limiters: Arc<Limiters>,
 }
 
 impl AppState {
@@ -24,6 +26,11 @@ impl AppState {
             ),
             challenges: Arc::new(ChallengeStore::new()),
             secret: Arc::new(cfg.jwt_secret),
+            limiters: Arc::new(Limiters::new(
+                cfg.rate_logs_per_min,
+                cfg.rate_auth_per_min,
+                cfg.rate_user_per_min,
+            )),
         })
     }
 }
