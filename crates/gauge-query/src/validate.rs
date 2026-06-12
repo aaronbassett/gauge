@@ -1,0 +1,105 @@
+use thiserror::Error;
+use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
+
+use crate::field::Field;
+use crate::request::{FilterOp, FilterValue, MAX_LIMIT, QueryRequest, TimeRange};
+
+#[derive(Debug, Error, PartialEq)]
+pub enum QueryError {
+    #[error("unknown field `{0}`")]
+    UnknownField(String),
+    #[error("measures must not be empty")]
+    EmptyMeasures,
+    #[error("limit {0} exceeds the maximum of {MAX_LIMIT}")]
+    LimitTooLarge(u32),
+    #[error("invalid time range `{0}` (expected <N>h, <N>d up to 365d, or RFC3339 from/to)")]
+    BadTimeRange(String),
+    #[error("filter on `{0}`: op `{1}` requires {2}")]
+    BadFilter(String, String, &'static str),
+    #[error("order field `{0}` is not in the selected output")]
+    BadOrderField(String),
+}
+
+pub fn parse_last(s: &str) -> Result<Duration, QueryError> {
+    let bad = || QueryError::BadTimeRange(s.to_string());
+    if s.len() < 2 {
+        return Err(bad());
+    }
+    let (num, unit) = s.split_at(s.len() - 1);
+    let n: i64 = num.parse().map_err(|_| bad())?;
+    if n < 1 {
+        return Err(bad());
+    }
+    let d = match unit {
+        "h" => Duration::hours(n),
+        "d" => Duration::days(n),
+        _ => return Err(bad()),
+    };
+    if d > Duration::days(365) {
+        return Err(bad());
+    }
+    Ok(d)
+}
+
+/// Resolve a TimeRange to concrete [from, to) bounds.
+pub fn resolve_time_range(
+    tr: &TimeRange,
+    now: OffsetDateTime,
+) -> Result<(OffsetDateTime, OffsetDateTime), QueryError> {
+    match tr {
+        TimeRange::Last { last } => Ok((now - parse_last(last)?, now)),
+        TimeRange::Absolute { from, to } => {
+            let f = OffsetDateTime::parse(from, &Rfc3339)
+                .map_err(|_| QueryError::BadTimeRange(from.clone()))?;
+            let t = OffsetDateTime::parse(to, &Rfc3339)
+                .map_err(|_| QueryError::BadTimeRange(to.clone()))?;
+            if f >= t {
+                return Err(QueryError::BadTimeRange(format!("{from}..{to}")));
+            }
+            Ok((f, t))
+        }
+    }
+}
+
+pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
+    if req.measures.is_empty() {
+        return Err(QueryError::EmptyMeasures);
+    }
+    if let Some(l) = req.limit
+        && l > MAX_LIMIT
+    {
+        return Err(QueryError::LimitTooLarge(l));
+    }
+    resolve_time_range(&req.time_range, OffsetDateTime::now_utc())?;
+    for f in &req.filters {
+        let fname = f.field.to_string();
+        let opname = format!("{:?}", f.op).to_lowercase();
+        match (f.op, &f.value) {
+            (FilterOp::Eq | FilterOp::Neq, Some(FilterValue::One(_))) => {}
+            (FilterOp::In, Some(FilterValue::Many(v))) if !v.is_empty() => {}
+            (FilterOp::Exists, None) => {
+                if !matches!(f.field, Field::Attr(_)) {
+                    return Err(QueryError::BadFilter(fname, opname, "an attr.<key> field"));
+                }
+            }
+            (FilterOp::Eq | FilterOp::Neq, _) => {
+                return Err(QueryError::BadFilter(
+                    fname,
+                    opname,
+                    "a single string value",
+                ));
+            }
+            (FilterOp::In, _) => {
+                return Err(QueryError::BadFilter(
+                    fname,
+                    opname,
+                    "a non-empty string array",
+                ));
+            }
+            (FilterOp::Exists, Some(_)) => {
+                return Err(QueryError::BadFilter(fname, opname, "no value"));
+            }
+        }
+    }
+    Ok(())
+}
