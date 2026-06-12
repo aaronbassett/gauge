@@ -128,3 +128,27 @@ async fn api_error_envelope_is_surfaced() {
     assert!(err.to_string().contains("unknown field"));
     unsafe { std::env::remove_var("GAUGE_CONFIG_DIR") };
 }
+
+#[tokio::test]
+async fn mcp_tools_call_through_to_api() {
+    let _g = env_lock().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    mock_auth(&server).await;
+    Mock::given(method("POST")).and(path("/v1/query"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "rows": [{"unique_installs": 42}], "truncated": false, "elapsed_ms": 2
+        })))
+        .mount(&server).await;
+    let api = std::sync::Arc::new(setup(&tmp, &server.uri()));
+    let mcp = gauge::mcp::server::GaugeMcp::new(api);
+    let result = mcp
+        .unique_users(rmcp::handler::server::wrapper::Parameters(gauge::mcp::tools::UniqueUsersParams {
+            period: "7d".into(), app: None, event_name: None,
+        }))
+        .await
+        .unwrap();
+    let text = format!("{result:?}");
+    assert!(text.contains("42"));
+    unsafe { std::env::remove_var("GAUGE_CONFIG_DIR") };
+}
