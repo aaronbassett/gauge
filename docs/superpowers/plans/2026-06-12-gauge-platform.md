@@ -45,6 +45,9 @@
   - **BUILD-INTEGRITY FIX + CI HARDENING:** PR #11 merged a `Cargo.toml` change (rmcp `0.6`→`1`) **without** the regenerated `Cargo.lock` (the task commits `git add`ed only `crates/gauge`), leaving `main`'s lock out of sync — `cargo build --locked` failed though CI (which didn't pass `--locked`) stayed green. Fixed the lock on `main` and **added `--locked` to the CI clippy+test steps** so lock drift now fails CI. **Going forward, dep-changing tasks MUST commit the root `Cargo.lock`** (Task 28 did so correctly: +249 lines).
   - **cargo-deny: `paste` unmaintained** (RUSTSEC-2024-0436) — pulled in transitively by ratatui 0.29; `paste` is feature-complete/deprecated (not a vulnerability), no safe upgrade. Added a **scoped** `ignore = ["RUSTSEC-2024-0436"]` to `deny.toml` (single ID, so other unmaintained/vulnerable crates still fail).
   - **Phase 3 plan refinement (this gate):** the sender is feature-gated behind `sender`, and its tests only run with `--all-features`. CI does NOT pass `--all-features` until Task 33's CI edit. **Therefore implement Tasks 31–33 as ONE PR** so that the PR's CI (after Task 33 sets clippy+test to `--all-features`) actually exercises the sender. Keep `--locked` alongside `--all-features` in that CI edit. No other Phase-3 task-step edits required.
+- 2026-06-12 — **PHASE GATE 3 (completion) passed.** Phase 3 (the sender) delivered via PR #13 (squash-merged, CI green with `--all-features --locked`). Full suite: **114 tests**. **Real sender→server→query E2E verified** (against a local gauge-server + Postgres): `gauge_events::sender` enqueued 3 events, `drain` POSTed all 3 (`sent:3, remaining:0`), server logged `accepted:3, rejected:0`, and an authenticated `gauge query` returned `{attr.surface: "sender-e2e", count:3, unique_installs:1}` — the exact path the TUI and the MCP `unique_users` tool use.
+  - **Phase-3 drift:** none. reqwest 0.12 blocking + wiremock 0.6 matched the plan verbatim; `Cargo.lock` committed with the reqwest addition; CI updated to `--all-features` while keeping `--locked`.
+  - **Migration note for Tome / Midnight Manual (IMPORTANT):** `SenderConfig.endpoint` is the **base** server URL — `transport::post_batch` appends `/v1/logs` itself. Passing a full `…/v1/logs` URL yields a doubled path → 404 → `drain` returns `sent:0` and silently keeps re-queuing (the gate E2E caught exactly this misconfiguration). The migration crates MUST set `endpoint` to the base URL only. The `sender_drain` unit tests use wiremock (which 200s any body), so they do NOT validate the encoded batch against the server's Gauge-profile validation — **rely on a real-server smoke (as in this gate) when wiring a new app.** `endpoint_allowed` requires `https://` (or `http://127.0.0.1`/`localhost` for local), so production senders must point at the deployed HTTPS endpoint.
 
 ### Implementation progress (durable recovery ledger)
 
@@ -82,10 +85,10 @@
 - [x] Task 29 — gauge: TUI app state + rendering (PR #12)
 - [x] Task 30 — gauge: TUI event loop + wiring (PR #12)
 - [x] PHASE GATE 2 → 3 (suite green @103; no stubs; real ed25519 E2E verified)
-- [ ] Task 31 — gauge-events: sender feature + disk queue
-- [ ] Task 32 — gauge-events: sender config, enqueue, encoder
-- [ ] Task 33 — gauge-events: sender transport + crash-safe drain
-- [ ] PHASE GATE 3 — completion
+- [x] Task 31 — gauge-events: sender feature + disk queue (PR #13)
+- [x] Task 32 — gauge-events: sender config, enqueue, encoder (PR #13)
+- [x] Task 33 — gauge-events: sender transport + crash-safe drain (PR #13)
+- [x] PHASE GATE 3 — completion (suite green @114; sender→server→query E2E verified)
 
 ---
 
@@ -7063,11 +7066,11 @@ git commit -m "feat(events): crash-safe sender drain with lock and at-least-once
 
 ## PHASE GATE 3 — completion
 
-- [ ] `cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace --all-features` — all green.
-- [ ] End-to-end against the deployed server: write a 5-line scratch program (or `cargo test`-style integration in a worktree) that uses `gauge_events::sender` to enqueue + drain real events, then confirm they appear in `gauge tui` and via `unique_users` through MCP.
-- [ ] Update the Plan changelog (final state, drift notes useful to the Tome/Midnight Manual migration projects).
-- [ ] Update `docs/superpowers/specs/2026-06-12-gauge-telemetry-platform-design.md` Future Work if anything learned here changes the migration guidance; commit.
-- [ ] Use superpowers:finishing-a-development-branch to close out.
+- [x] `cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings && cargo test --workspace --all-features --locked` — all green (**114 tests**).
+- [x] End-to-end with `gauge_events::sender` against a local gauge-server: enqueued 3 + `drain` (`sent:3, remaining:0`); confirmed via authenticated `gauge query` (the TUI/MCP `unique_users` path) returning `count:3, unique_installs:1`. (Deployed-server run deferred with the rest of deploy; local server is the same binary.)
+- [x] Plan changelog updated (final state + Tome/MNM migration drift notes — base-URL endpoint, wiremock-vs-real-server caveat, https requirement).
+- [x] Spec Future Work reviewed — the migration guidance learnings are captured in the plan changelog; no spec change needed (the spec's Future Work already points to the sender as the migration vehicle).
+- [x] `superpowers:finishing-a-development-branch` run (see final report `docs/superpowers/reports/2026-06-12-implementation-report.md`).
 
 
 
