@@ -32,10 +32,15 @@ fn ok_json<T: serde::Serialize>(v: &T) -> Result<CallToolResult, McpError> {
 #[tool_router]
 impl GaugeMcp {
     pub fn new(api: Arc<ApiClient>) -> Self {
-        Self { api, tool_router: Self::tool_router() }
+        Self {
+            api,
+            tool_router: Self::tool_router(),
+        }
     }
 
-    #[tool(description = "Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions. Dimensions: app, event_name, app_version, os, arch, attr.<key>. Time ranges: {\"last\":\"7d\"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and attribute keys.")]
+    #[tool(
+        description = "Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions. Dimensions: app, event_name, app_version, os, arch, attr.<key>. Time ranges: {\"last\":\"7d\"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and attribute keys."
+    )]
     pub async fn query_telemetry(
         &self,
         Parameters(req): Parameters<gauge_query::QueryRequest>,
@@ -43,25 +48,43 @@ impl GaugeMcp {
         ok_json(&self.api.query(&req).await.map_err(to_mcp_err)?)
     }
 
-    #[tool(description = "Discover what is queryable: apps, their event names, attribute keys, totals, and time span.")]
+    #[tool(
+        description = "Discover what is queryable: apps, their event names, attribute keys, totals, and time span."
+    )]
     pub async fn get_meta(&self) -> Result<CallToolResult, McpError> {
         ok_json(&self.api.meta().await.map_err(to_mcp_err)?)
     }
 
-    #[tool(description = "How many unique users (anonymous installs) in a period, optionally filtered by app and/or event name. Example: unique users who ran a search in the last week.")]
+    #[tool(
+        description = "How many unique users (anonymous installs) in a period, optionally filtered by app and/or event name. Example: unique users who ran a search in the last week."
+    )]
     pub async fn unique_users(
         &self,
         Parameters(p): Parameters<UniqueUsersParams>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(&self.api.query(&unique_users_query(&p)).await.map_err(to_mcp_err)?)
+        ok_json(
+            &self
+                .api
+                .query(&unique_users_query(&p))
+                .await
+                .map_err(to_mcp_err)?,
+        )
     }
 
-    #[tool(description = "The most used events (top-N event types) in a period, ranked by count or unique installs. Answers 'what is our most used X'.")]
+    #[tool(
+        description = "The most used events (top-N event types) in a period, ranked by count or unique installs. Answers 'what is our most used X'."
+    )]
     pub async fn top_events(
         &self,
         Parameters(p): Parameters<TopEventsParams>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(&self.api.query(&top_events_query(&p)).await.map_err(to_mcp_err)?)
+        ok_json(
+            &self
+                .api
+                .query(&top_events_query(&p))
+                .await
+                .map_err(to_mcp_err)?,
+        )
     }
 
     #[tool(description = "Event volume over time (hour/day/week buckets) for trend questions.")]
@@ -69,7 +92,13 @@ impl GaugeMcp {
         &self,
         Parameters(p): Parameters<EventsOverTimeParams>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(&self.api.query(&events_over_time_query(&p)).await.map_err(to_mcp_err)?)
+        ok_json(
+            &self
+                .api
+                .query(&events_over_time_query(&p))
+                .await
+                .map_err(to_mcp_err)?,
+        )
     }
 }
 

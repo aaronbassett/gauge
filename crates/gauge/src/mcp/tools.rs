@@ -8,7 +8,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 fn eq_filter(field: Field, value: &str) -> Filter {
-    Filter { field, op: FilterOp::Eq, value: Some(FilterValue::One(value.to_string())) }
+    Filter {
+        field,
+        op: FilterOp::Eq,
+        value: Some(FilterValue::One(value.to_string())),
+    }
 }
 
 fn base_filters(app: &Option<String>, event_name: &Option<String>) -> Vec<Filter> {
@@ -35,7 +39,9 @@ pub fn unique_users_query(p: &UniqueUsersParams) -> QueryRequest {
         measures: vec![Measure::UniqueInstalls],
         dimensions: vec![],
         filters: base_filters(&p.app, &p.event_name),
-        time_range: TimeRange::Last { last: p.period.clone() },
+        time_range: TimeRange::Last {
+            last: p.period.clone(),
+        },
         granularity: None,
         order: vec![],
         limit: None,
@@ -67,9 +73,14 @@ pub fn top_events_query(p: &TopEventsParams) -> QueryRequest {
         measures: vec![measure],
         dimensions: vec![Field::EventName],
         filters: base_filters(&p.app, &None),
-        time_range: TimeRange::Last { last: p.period.clone() },
+        time_range: TimeRange::Last {
+            last: p.period.clone(),
+        },
         granularity: None,
-        order: vec![Order { field: measure.alias().into(), dir: Dir::Desc }],
+        order: vec![Order {
+            field: measure.alias().into(),
+            dir: Dir::Desc,
+        }],
         limit: Some(p.limit.unwrap_or(10)),
     }
 }
@@ -87,7 +98,9 @@ pub fn events_over_time_query(p: &EventsOverTimeParams) -> QueryRequest {
         measures: vec![Measure::Count],
         dimensions: vec![],
         filters: base_filters(&p.app, &p.event_name),
-        time_range: TimeRange::Last { last: p.period.clone() },
+        time_range: TimeRange::Last {
+            last: p.period.clone(),
+        },
         granularity: Some(p.granularity),
         order: vec![],
         limit: None,
@@ -114,10 +127,18 @@ mod tests {
 
     #[test]
     fn top_events_defaults_and_orders_desc() {
-        let q = top_events_query(&TopEventsParams { period: "30d".into(), app: None, by: None, limit: None });
+        let q = top_events_query(&TopEventsParams {
+            period: "30d".into(),
+            app: None,
+            by: None,
+            limit: None,
+        });
         let json = serde_json::to_value(&q).unwrap();
         assert_eq!(json["dimensions"], serde_json::json!(["event_name"]));
-        assert_eq!(json["order"], serde_json::json!([{"field": "count", "dir": "desc"}]));
+        assert_eq!(
+            json["order"],
+            serde_json::json!([{"field": "count", "dir": "desc"}])
+        );
         assert_eq!(json["limit"], 10);
         gauge_query::validate(&q).unwrap();
     }
@@ -140,10 +161,22 @@ mod tests {
         // Guards the MCP tool surface: schemars must produce schemas agents can read.
         let schema = serde_json::to_value(schemars::schema_for!(UniqueUsersParams)).unwrap();
         assert!(schema["properties"]["period"].is_object());
-        let schema = serde_json::to_value(schemars::schema_for!(gauge_query::QueryRequest)).unwrap();
+        let schema =
+            serde_json::to_value(schemars::schema_for!(gauge_query::QueryRequest)).unwrap();
         let props = schema["properties"].as_object().unwrap();
-        for key in ["measures", "dimensions", "filters", "time_range", "granularity", "order", "limit"] {
-            assert!(props.contains_key(key), "QueryRequest schema missing `{key}`");
+        for key in [
+            "measures",
+            "dimensions",
+            "filters",
+            "time_range",
+            "granularity",
+            "order",
+            "limit",
+        ] {
+            assert!(
+                props.contains_key(key),
+                "QueryRequest schema missing `{key}`"
+            );
         }
     }
 }
