@@ -71,8 +71,8 @@
 - [x] Task 16 — gauge-server: query SQL builder (PR #7)
 - [x] Task 17 — gauge-server: POST /v1/query (PR #7)
 - [x] Task 18 — gauge-server: GET /v1/meta (PR #7)
-- [ ] Task 19 — gauge-server: rate limiting
-- [ ] Task 20 — gauge-server: privacy canary tests
+- [x] Task 19 — gauge-server: rate limiting (PR #8)
+- [x] Task 20 — gauge-server: privacy canary tests (PR #8)
 - [x] Task 21 — Deployment: Dockerfile, fly.toml, runbook (PR #9)
 - [x] PHASE GATE 1 → 2 (suite green @ 84 tests; deploy deferred to human)
 - [x] Task 22 — gauge: CLI scaffold, paths, config, error (PR #10)
