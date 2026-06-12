@@ -16,6 +16,11 @@ impl Keypair {
         Self(SigningKey::from_bytes(seed))
     }
 
+    /// Returns the raw 32-byte private seed. Intended ONLY for one-time
+    /// serialization to local key storage at enrollment — never call this on a
+    /// request path, and never pass the result to `format!`/`tracing`/logging.
+    /// The returned copy escapes `SigningKey`'s zeroize-on-drop, so the caller
+    /// owns its lifetime. (Future hardening: return `zeroize::Zeroizing`.)
     pub fn seed(&self) -> [u8; 32] {
         self.0.to_bytes()
     }

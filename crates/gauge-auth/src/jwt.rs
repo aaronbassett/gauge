@@ -62,6 +62,9 @@ pub fn mint_token(
 pub fn verify_token(secret: &SigningSecret, token: &str) -> Result<Claims, AuthError> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.leeway = 0;
+    // `exp` is validated by default. `nbf` is NOT (jsonwebtoken 9 defaults
+    // `validate_nbf` to false) and `Claims` has no `nbf`; if one is ever added,
+    // set `validation.validate_nbf = true` explicitly.
     decode::<Claims>(token, &DecodingKey::from_secret(&secret.0), &validation)
         .map(|d| d.claims)
         .map_err(|e| AuthError::Jwt(e.to_string()))

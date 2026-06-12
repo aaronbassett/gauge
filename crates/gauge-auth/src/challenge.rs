@@ -50,6 +50,9 @@ impl ChallengeStore {
             .unwrap()
             .remove(id)
             .ok_or(AuthError::ChallengeNotFound)?;
+        // Expiry is strictly AFTER expires_at: `now == expires_at` is still
+        // valid. This invariant is mirrored in `purge_expired` below — keep the
+        // two conditions in sync.
         if now > c.expires_at {
             return Err(AuthError::ChallengeExpired);
         }
@@ -57,6 +60,8 @@ impl ChallengeStore {
     }
 
     pub fn purge_expired(&self, now: OffsetDateTime) {
+        // Retains exactly the challenges `consume` would still accept (see the
+        // boundary note above): keep when `expires_at >= now`.
         self.inner
             .lock()
             .unwrap()

@@ -66,4 +66,22 @@ mod tests {
         assert_eq!(b64_decode_flexible("aGk=").unwrap(), b"hi");
         assert_eq!(b64_decode_flexible("aGk").unwrap(), b"hi");
     }
+
+    #[test]
+    fn parse_rejects_invalid_curve_point() {
+        // 32 bytes of the right length and valid base64, but not a decodable
+        // Edwards point: this y-coordinate fails decompression in dalek, so the
+        // length check passes and `VerifyingKey::from_bytes` is what rejects it.
+        let mut bad = [0u8; 32];
+        bad[0] = 0x02;
+        bad[31] = 0x80;
+        let wire = format!(
+            "ed25519:{}",
+            base64::engine::general_purpose::STANDARD_NO_PAD.encode(bad)
+        );
+        assert!(matches!(
+            parse_public_key_wire(&wire),
+            Err(AuthError::InvalidWireFormat)
+        ));
+    }
 }

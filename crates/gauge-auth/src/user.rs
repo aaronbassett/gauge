@@ -100,6 +100,9 @@ note = "test user"
     fn rejects_wrong_schema_version() {
         let err = UserStore::from_toml_str("schema_version = 2").unwrap_err();
         assert!(matches!(err, AuthError::UserStore(_)));
+        // `!= 1` also rejects the lower boundary.
+        let err0 = UserStore::from_toml_str("schema_version = 0").unwrap_err();
+        assert!(matches!(err0, AuthError::UserStore(_)));
     }
 
     #[test]
