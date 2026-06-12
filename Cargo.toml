@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/gauge-auth",
+    "crates/gauge-events",
+    "crates/gauge-query",
+    "crates/gauge-server",
+    "crates/gauge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.93"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+time = { version = "=0.3.47", features = ["serde-human-readable", "formatting", "parsing", "macros"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
+schemars = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+jsonwebtoken = "9"
+toml = "0.8"
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "request-id"] }
+futures = "0.3"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "time", "json", "migrate", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.28"
+rmcp = { version = "0.6", features = ["server", "transport-io"] }
+insta = { version = "1", features = ["json"] }
+wiremock = "0.6"
+tempfile = "3"
