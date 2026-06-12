@@ -14,7 +14,12 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
-        Self { status, code, message: message.into(), remediation: None }
+        Self {
+            status,
+            code,
+            message: message.into(),
+            remediation: None,
+        }
     }
     pub fn with_remediation(mut self, r: impl Into<String>) -> Self {
         self.remediation = Some(r.into());

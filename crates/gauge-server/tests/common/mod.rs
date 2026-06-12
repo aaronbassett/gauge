@@ -47,7 +47,9 @@ pub async fn send_json(
     };
     let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json = if bytes.is_empty() {
         serde_json::Value::Null
     } else {
