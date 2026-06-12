@@ -25,6 +25,49 @@
 ### Plan changelog
 
 - 2026-06-12: Initial plan written.
+- 2026-06-12 (execution): Began autonomous subagent-driven execution. Drift log accumulates here; consolidated at each phase gate.
+  - Task 1: pinned `time = "=0.3.47"` (workspace dep). `time 0.3.48` (edition 2024) adds a blanket impl that conflicts (E0119) with `sqlx-core 0.8.6`'s `impl<T> From<T> for Json<T>`. Pin keeps `sqlx 0.8` + `rust-version 1.93`. Revisit if sqlx 0.8.x patches or we move to sqlx 0.9 (needs Rust ≥1.94).
+
+### Implementation progress (durable recovery ledger)
+
+> One box per task/gate. Ticked when the task's PR is merged to `main`. This is the source of truth for resuming the loop after a crash.
+
+- [x] Task 1 — Workspace scaffolding + CI (PR #1, merged)
+- [ ] Task 2 — gauge-auth: error + wire format
+- [ ] Task 3 — gauge-auth: keypair
+- [ ] Task 4 — gauge-auth: user store
+- [ ] Task 5 — gauge-auth: challenge store
+- [ ] Task 6 — gauge-auth: JWT + protocol + client
+- [ ] Task 7 — gauge-events: OTLP wire types
+- [ ] Task 8 — gauge-events: Gauge profile validation
+- [ ] Task 9 — gauge-events: SPEC.md + pin test
+- [ ] Task 10 — gauge-query: query DSL types
+- [ ] Task 11 — gauge-server: scaffold
+- [ ] Task 12 — gauge-server: events migration + batch insert
+- [ ] Task 13 — gauge-server: OTLP ingest endpoint
+- [ ] Task 14 — gauge-server: auth endpoints
+- [ ] Task 15 — gauge-server: bearer middleware
+- [ ] Task 16 — gauge-server: query SQL builder
+- [ ] Task 17 — gauge-server: POST /v1/query
+- [ ] Task 18 — gauge-server: GET /v1/meta
+- [ ] Task 19 — gauge-server: rate limiting
+- [ ] Task 20 — gauge-server: privacy canary tests
+- [ ] Task 21 — Deployment: Dockerfile, fly.toml, runbook
+- [ ] PHASE GATE 1 → 2
+- [ ] Task 22 — gauge: CLI scaffold, paths, config, error
+- [ ] Task 23 — gauge: keys generate
+- [ ] Task 24 — gauge: ApiClient (login, token cache, 401 retry)
+- [ ] Task 25 — gauge: query one-shot command
+- [ ] Task 26 — gauge: MCP tool query builders (pure)
+- [ ] Task 27 — gauge: MCP server (rmcp, stdio)
+- [ ] Task 28 — gauge: TUI data layer
+- [ ] Task 29 — gauge: TUI app state + rendering
+- [ ] Task 30 — gauge: TUI event loop + wiring
+- [ ] PHASE GATE 2 → 3
+- [ ] Task 31 — gauge-events: sender feature + disk queue
+- [ ] Task 32 — gauge-events: sender config, enqueue, encoder
+- [ ] Task 33 — gauge-events: sender transport + crash-safe drain
+- [ ] PHASE GATE 3 — completion
 
 ---
 
