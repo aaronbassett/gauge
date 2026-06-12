@@ -38,6 +38,13 @@
   - **No drift** in axum 0.8 / sqlx 0.8 / tower-http 0.6 / tracing-subscriber 0.3 / schemars 1 / insta 1 — the plan's code compiled verbatim against all of them.
   - **Deploy DEFERRED TO HUMAN** (the single permitted deferral). `fly` is authenticated locally, but `fly deploy` provisions billable infra (Fly Managed Postgres + an always-on machine) and a public endpoint — an outward-facing, billing-bearing action that should be a human's call. Deploy-readiness fully verified locally: `Dockerfile.server` builds a 60.3 MB distroless image; the release binary boots against Postgres, runs migrations, and serves `/healthz`=200, `/readyz`=200, ingests the SPEC example (200, `accepted:1`), and 401s unauthenticated `/v1/query`. Runbook ready at `docs/deploy.md`.
   - **Phase 2/3 forward review (re-read against learnings):** No task-step edits required. Client/sender task code references **workspace** deps, so the `time` pin and all resolved versions flow through automatically. **Version-drift heads-up for Phase 2 (recorded, no action — pins intentional):** latest published `rmcp` is **1.7.0** (plan pins `0.6`; `0.6.4` is the resolved tip — the macro API changed across majors, so Task 27 should follow its existing rmcp-drift warning and adapt within 0.6.x), `ratatui` **0.30.1** (plan `0.29`), `crossterm` **0.29.0** (plan `0.28`). Workspace reqs hold these at the plan's assumed series; a future major upgrade (rmcp 1.x / ratatui 0.30) is recommended but out of scope for this plan.
+- 2026-06-12 — **PHASE GATE 2 → 3 passed.** Phase 2 (the `gauge` client) delivered via PRs #10–#12, all squash-merged, CI green. Suite green: **103 tests**; `grep todo_stub` clean; **real end-to-end verified** (`gauge keys generate` → register → `gauge login` ed25519 challenge/response over HTTP → server "admin token issued" → authenticated `gauge query` returned `{app:tome,count:2,unique_installs:1}` from Postgres). Phase-2 drift & decisions:
+  - **rmcp 0.6 → 1.7.0** (Task 27): the implementer's initial claim that "0.6 doesn't exist/yanked" was **false** — rmcp 0.6.4 is unyanked and schemars-1 compatible, so it likely would have compiled. We deliberately moved the workspace dep to `rmcp = "1"` (→1.7.0, the **current stable major**; the plan pinned 0.6 only as "current at plan time" and its drift note authorizes adapting to the resolved version). Adapted 5 symbols: `ToolRouter` path (`handler::server::router::tool`), `Parameters` path (`handler::server::wrapper`), `#[tool_handler(router = self.tool_router)]`, `ServerInfo::new(caps).with_instructions(...)` (now `#[non_exhaustive]`). Same five tools, same anonymity-preserving descriptions. Verified via direct-handler test **and** a real stdio `initialize`+`tools/list` smoke (all 5 tools advertised; anonymity instruction present).
+  - **No ratatui/crossterm drift** (Tasks 28–30): the pins resolve to ratatui 0.29.0 / crossterm 0.28.1, whose widget/event APIs match the plan verbatim.
+  - **`tokio::sync::Mutex`** for async test `env_lock`s (api.rs, tui_data.rs) — clippy `await_holding_lock` under `-D warnings`. `impl Default for App` — clippy `new_without_default`.
+  - **BUILD-INTEGRITY FIX + CI HARDENING:** PR #11 merged a `Cargo.toml` change (rmcp `0.6`→`1`) **without** the regenerated `Cargo.lock` (the task commits `git add`ed only `crates/gauge`), leaving `main`'s lock out of sync — `cargo build --locked` failed though CI (which didn't pass `--locked`) stayed green. Fixed the lock on `main` and **added `--locked` to the CI clippy+test steps** so lock drift now fails CI. **Going forward, dep-changing tasks MUST commit the root `Cargo.lock`** (Task 28 did so correctly: +249 lines).
+  - **cargo-deny: `paste` unmaintained** (RUSTSEC-2024-0436) — pulled in transitively by ratatui 0.29; `paste` is feature-complete/deprecated (not a vulnerability), no safe upgrade. Added a **scoped** `ignore = ["RUSTSEC-2024-0436"]` to `deny.toml` (single ID, so other unmaintained/vulnerable crates still fail).
+  - **Phase 3 plan refinement (this gate):** the sender is feature-gated behind `sender`, and its tests only run with `--all-features`. CI does NOT pass `--all-features` until Task 33's CI edit. **Therefore implement Tasks 31–33 as ONE PR** so that the PR's CI (after Task 33 sets clippy+test to `--all-features`) actually exercises the sender. Keep `--locked` alongside `--all-features` in that CI edit. No other Phase-3 task-step edits required.
 
 ### Implementation progress (durable recovery ledger)
 
@@ -71,10 +78,10 @@
 - [x] Task 25 — gauge: query one-shot command (PR #11)
 - [x] Task 26 — gauge: MCP tool query builders (pure) (PR #11)
 - [x] Task 27 — gauge: MCP server (rmcp 1.7.0, stdio) (PR #11)
-- [ ] Task 28 — gauge: TUI data layer
-- [ ] Task 29 — gauge: TUI app state + rendering
-- [ ] Task 30 — gauge: TUI event loop + wiring
-- [ ] PHASE GATE 2 → 3
+- [x] Task 28 — gauge: TUI data layer (PR #12)
+- [x] Task 29 — gauge: TUI app state + rendering (PR #12)
+- [x] Task 30 — gauge: TUI event loop + wiring (PR #12)
+- [x] PHASE GATE 2 → 3 (suite green @103; no stubs; real ed25519 E2E verified)
 - [ ] Task 31 — gauge-events: sender feature + disk queue
 - [ ] Task 32 — gauge-events: sender config, enqueue, encoder
 - [ ] Task 33 — gauge-events: sender transport + crash-safe drain
@@ -6379,11 +6386,11 @@ git commit -m "feat(client): TUI event loop with background refresh and stale fa
 
 ## PHASE GATE 2 → 3
 
-- [ ] `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — all green.
-- [ ] `grep -rn "todo_stub" crates/gauge/src` returns nothing (all subcommands wired).
-- [ ] Manual E2E pass: `gauge keys generate` → register in deployed users.toml → `gauge login` → `gauge query '{"measures":["count"],"time_range":{"last":"7d"}}'` → `gauge tui` → MCP smoke via `tools/list`.
-- [ ] Re-read Phase 3 below against learnings (especially gauge-events API surface and reqwest feature handling). Edit affected steps.
-- [ ] Update the Plan changelog; commit the revision.
+- [x] `cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings && cargo test --workspace --all-features --locked` — all green (**103 tests**).
+- [x] `grep -rn "todo_stub" crates/gauge/src` returns nothing (all subcommands wired) — confirmed clean.
+- [x] Manual E2E pass — done locally against a running gauge-server + Postgres: `gauge keys generate --user-id alice` → registered in `GAUGE_USER_STORE` → `gauge login` (ed25519 challenge/response over HTTP; server logged "admin token issued") → `gauge query` returned `{app:tome, count:2, unique_installs:1}`. MCP `initialize`+`tools/list` stdio smoke advertised all 5 tools. TUI render verified via `TestBackend`. (Full TUI against a live server is the same path the data-layer + render tests cover.)
+- [x] Re-read Phase 3 — implement Tasks 31–33 as ONE PR so CI's `--all-features` update (Task 33) exercises the feature-gated sender; keep `--locked`. No other edits required. (See changelog.)
+- [x] Plan changelog updated (Phase Gate 2 consolidation entry above); committed with this revision.
 
 ---
 
