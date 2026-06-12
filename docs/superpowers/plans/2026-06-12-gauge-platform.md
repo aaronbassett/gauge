@@ -47,9 +47,9 @@
 - [x] Task 13 — gauge-server: OTLP ingest endpoint (PR #6)
 - [x] Task 14 — gauge-server: auth endpoints (PR #6)
 - [x] Task 15 — gauge-server: bearer middleware (PR #6)
-- [ ] Task 16 — gauge-server: query SQL builder
-- [ ] Task 17 — gauge-server: POST /v1/query
-- [ ] Task 18 — gauge-server: GET /v1/meta
+- [x] Task 16 — gauge-server: query SQL builder (PR #7)
+- [x] Task 17 — gauge-server: POST /v1/query (PR #7)
+- [x] Task 18 — gauge-server: GET /v1/meta (PR #7)
 - [ ] Task 19 — gauge-server: rate limiting
 - [ ] Task 20 — gauge-server: privacy canary tests
 - [ ] Task 21 — Deployment: Dockerfile, fly.toml, runbook
