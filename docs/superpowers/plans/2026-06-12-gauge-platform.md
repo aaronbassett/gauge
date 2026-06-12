@@ -65,9 +65,9 @@
 - [ ] Task 20 — gauge-server: privacy canary tests
 - [x] Task 21 — Deployment: Dockerfile, fly.toml, runbook (PR #9)
 - [x] PHASE GATE 1 → 2 (suite green @ 84 tests; deploy deferred to human)
-- [ ] Task 22 — gauge: CLI scaffold, paths, config, error
-- [ ] Task 23 — gauge: keys generate
-- [ ] Task 24 — gauge: ApiClient (login, token cache, 401 retry)
+- [x] Task 22 — gauge: CLI scaffold, paths, config, error (PR #10)
+- [x] Task 23 — gauge: keys generate (PR #10)
+- [x] Task 24 — gauge: ApiClient (login, token cache, 401 retry) (PR #10)
 - [ ] Task 25 — gauge: query one-shot command
 - [ ] Task 26 — gauge: MCP tool query builders (pure)
 - [ ] Task 27 — gauge: MCP server (rmcp, stdio)
