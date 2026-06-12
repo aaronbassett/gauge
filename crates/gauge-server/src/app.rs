@@ -15,9 +15,16 @@ pub fn build_router(state: AppState) -> Router {
     let auth = Router::new()
         .route("/v1/auth/challenge", post(routes::auth::challenge))
         .route("/v1/auth/verify", post(routes::auth::verify));
+    let protected = Router::new()
+        .route("/v1/query", post(routes::query::query))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::bearer::require_bearer,
+        ));
     public
         .merge(ingest)
         .merge(auth)
+        .merge(protected)
         .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
