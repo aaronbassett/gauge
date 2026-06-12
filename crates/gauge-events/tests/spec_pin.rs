@@ -14,8 +14,7 @@ fn spec_worked_example_matches_fixture_exactly() {
 
 #[test]
 fn spec_example_is_a_valid_gauge_batch() {
-    let req: gauge_events::otlp::ExportLogsServiceRequest =
-        serde_json::from_str(FIXTURE).unwrap();
+    let req: gauge_events::otlp::ExportLogsServiceRequest = serde_json::from_str(FIXTURE).unwrap();
     let batch = gauge_events::profile::validate_batch(&req, &["tome".to_string()]).unwrap();
     assert!(batch.rejections.is_empty());
 }

@@ -36,7 +36,11 @@ pub struct ScopeLogs {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogRecord {
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "u64_string_opt")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "u64_string_opt"
+    )]
     pub time_unix_nano: Option<u64>,
     /// OTLP >= 1.4 LogRecord event name field.
     #[serde(default, skip_serializing_if = "Option::is_none")]

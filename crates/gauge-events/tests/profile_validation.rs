@@ -43,7 +43,10 @@ fn missing_resource_attr_is_batch_error() {
         .attributes
         .retain(|kv| kv.key != "service.instance.id");
     let err = validate_batch(&req, &allow()).unwrap_err();
-    assert!(matches!(err, BatchError::BadResourceAttr("service.instance.id")));
+    assert!(matches!(
+        err,
+        BatchError::BadResourceAttr("service.instance.id")
+    ));
 }
 
 #[test]
@@ -54,7 +57,10 @@ fn bad_os_type_is_batch_error() {
             kv.value.string_value = Some("macos".into()); // profile requires "darwin"
         }
     }
-    assert!(matches!(validate_batch(&req, &allow()), Err(BatchError::BadResourceAttr("os.type"))));
+    assert!(matches!(
+        validate_batch(&req, &allow()),
+        Err(BatchError::BadResourceAttr("os.type"))
+    ));
 }
 
 #[test]
@@ -62,7 +68,10 @@ fn multiple_resource_blocks_rejected() {
     let mut req = fixture();
     let dup = req.resource_logs[0].clone();
     req.resource_logs.push(dup);
-    assert!(matches!(validate_batch(&req, &allow()), Err(BatchError::ExpectedSingleResource)));
+    assert!(matches!(
+        validate_batch(&req, &allow()),
+        Err(BatchError::ExpectedSingleResource)
+    ));
 }
 
 #[test]
@@ -118,5 +127,8 @@ fn too_many_records_is_batch_error() {
     let mut req = fixture();
     let rec = req.resource_logs[0].scope_logs[0].log_records[0].clone();
     req.resource_logs[0].scope_logs[0].log_records = vec![rec; 1001];
-    assert!(matches!(validate_batch(&req, &allow()), Err(BatchError::TooManyRecords)));
+    assert!(matches!(
+        validate_batch(&req, &allow()),
+        Err(BatchError::TooManyRecords)
+    ));
 }

@@ -107,7 +107,14 @@ pub fn validate_batch(
         return Err(BatchError::TooManyRecords);
     }
 
-    let resource = ResourceInfo { app, app_version, install_id, session_id, os, arch };
+    let resource = ResourceInfo {
+        app,
+        app_version,
+        install_id,
+        session_id,
+        os,
+        arch,
+    };
     let mut events = Vec::new();
     let mut rejections = Vec::new();
     for (index, rec) in records.iter().enumerate() {
@@ -116,7 +123,11 @@ pub fn validate_batch(
             Err(reason) => rejections.push(Rejection { index, reason }),
         }
     }
-    Ok(ValidatedBatch { resource, events, rejections })
+    Ok(ValidatedBatch {
+        resource,
+        events,
+        rejections,
+    })
 }
 
 fn parse_record(rec: &LogRecord, app: &str) -> Result<ParsedEvent, String> {
@@ -129,7 +140,9 @@ fn parse_record(rec: &LogRecord, app: &str) -> Result<ParsedEvent, String> {
                 .find(|kv| kv.key == "event.name")
                 .and_then(|kv| kv.value.string_value.clone())
         })
-        .ok_or_else(|| "missing event name (eventName field or event.name attribute)".to_string())?;
+        .ok_or_else(|| {
+            "missing event name (eventName field or event.name attribute)".to_string()
+        })?;
     if !event_name.starts_with(&format!("{app}.")) {
         return Err(format!("event name must be prefixed with `{app}.`"));
     }
@@ -141,7 +154,11 @@ fn parse_record(rec: &LogRecord, app: &str) -> Result<ParsedEvent, String> {
     let time = OffsetDateTime::from_unix_timestamp_nanos(nanos as i128)
         .map_err(|_| "timeUnixNano out of range".to_string())?;
 
-    let attrs: Vec<&KeyValue> = rec.attributes.iter().filter(|kv| kv.key != "event.name").collect();
+    let attrs: Vec<&KeyValue> = rec
+        .attributes
+        .iter()
+        .filter(|kv| kv.key != "event.name")
+        .collect();
     if attrs.len() > MAX_ATTRIBUTES_PER_RECORD {
         return Err(format!("more than {MAX_ATTRIBUTES_PER_RECORD} attributes"));
     }
@@ -151,7 +168,10 @@ fn parse_record(rec: &LogRecord, app: &str) -> Result<ParsedEvent, String> {
         let v = &kv.value;
         let value = if let Some(s) = &v.string_value {
             if s.len() > MAX_ATTR_STRING_BYTES {
-                return Err(format!("attribute `{}` exceeds {MAX_ATTR_STRING_BYTES} bytes", kv.key));
+                return Err(format!(
+                    "attribute `{}` exceeds {MAX_ATTR_STRING_BYTES} bytes",
+                    kv.key
+                ));
             }
             Value::String(s.clone())
         } else if let Some(b) = v.bool_value {
@@ -171,5 +191,9 @@ fn parse_record(rec: &LogRecord, app: &str) -> Result<ParsedEvent, String> {
         };
         attributes.insert(kv.key.clone(), value);
     }
-    Ok(ParsedEvent { event_name, time, attributes })
+    Ok(ParsedEvent {
+        event_name,
+        time,
+        attributes,
+    })
 }
