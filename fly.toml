@@ -1,0 +1,28 @@
+app = "gauge-telemetry"
+primary_region = "lhr"
+
+[build]
+dockerfile = "Dockerfile.server"
+
+[http_service]
+internal_port = 8080
+force_https = true
+auto_stop_machines = "stop"
+auto_start_machines = true
+min_machines_running = 1
+
+[[http_service.checks]]
+interval = "30s"
+timeout = "2s"
+method = "GET"
+path = "/healthz"
+
+[[http_service.checks]]
+interval = "10s"
+timeout = "2s"
+method = "GET"
+path = "/readyz"
+
+[[vm]]
+size = "shared-cpu-1x"
+memory = "2gb"
