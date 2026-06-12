@@ -103,6 +103,26 @@ async fn attr_filter_and_dimension_work(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn exists_filter_executes_end_to_end(pool: PgPool) {
+    // Exercises the `exists` filter SQL path against real Postgres (the snapshot
+    // test only checks SQL text). All 6 seeded events carry a `surface` attr.
+    seed(&pool).await;
+    let (state, _kp) = common::test_state(pool);
+    let t = token(&state);
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "measures": ["count"],
+        "dimensions": ["os"],
+        "filters": [{"field": "attr.surface", "op": "exists"}],
+        "time_range": {"last": "1d"}
+    });
+    let (status, resp) = common::send_json(&app, "POST", "/v1/query", Some(body), Some(&t)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resp["rows"][0]["os"], "darwin");
+    assert_eq!(resp["rows"][0]["count"], 6);
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn invalid_query_is_422_naming_the_field(pool: PgPool) {
     let (state, _kp) = common::test_state(pool);
     let t = token(&state);

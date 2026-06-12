@@ -104,17 +104,23 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
     }
 
     for f in &req.filters {
-        let expr = field_expr(&f.field, &mut binds);
+        // `field_expr` is built INSIDE each value-comparison arm so it is only
+        // bound when actually used. The `exists` arm builds its own expression
+        // (`attributes ? key`) and must NOT call `field_expr`, or it would push
+        // an unreferenced bind and leave a gap in the $N numbering.
         match (f.op, f.value.as_ref()) {
             (FilterOp::Eq, Some(FilterValue::One(v))) => {
+                let expr = field_expr(&f.field, &mut binds);
                 let p = ph(&mut binds, Bind::Text(v.clone()));
                 wheres.push(format!("{expr} = {p}"));
             }
             (FilterOp::Neq, Some(FilterValue::One(v))) => {
+                let expr = field_expr(&f.field, &mut binds);
                 let p = ph(&mut binds, Bind::Text(v.clone()));
                 wheres.push(format!("{expr} <> {p}"));
             }
             (FilterOp::In, Some(FilterValue::Many(v))) => {
+                let expr = field_expr(&f.field, &mut binds);
                 let p = ph(&mut binds, Bind::TextArr(v.clone()));
                 wheres.push(format!("{expr} = ANY({p})"));
             }
