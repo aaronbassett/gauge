@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::profile::MAX_RECORDS_PER_BATCH;
-use crate::sender::encode::{encode_batch, QueuedEvent, SenderConfig};
+use crate::sender::encode::{QueuedEvent, SenderConfig, encode_batch};
 use crate::sender::queue;
-use crate::sender::transport::{post_batch, SenderError};
+use crate::sender::transport::{SenderError, post_batch};
 
 const STALE_LOCK_AFTER: Duration = Duration::from_secs(600);
 
@@ -24,18 +24,24 @@ impl Drop for LockGuard {
 }
 
 fn acquire_lock(path: &Path) -> std::io::Result<Option<LockGuard>> {
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
         Ok(_) => Ok(Some(LockGuard(path.to_path_buf()))),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let stale = std::fs::metadata(path)
                 .and_then(|m| m.modified())
-                .map(|t| {
-                    SystemTime::now().duration_since(t).unwrap_or_default() > STALE_LOCK_AFTER
-                })
+                .map(|t| SystemTime::now().duration_since(t).unwrap_or_default() > STALE_LOCK_AFTER)
                 .unwrap_or(true);
             if stale {
                 let _ = std::fs::remove_file(path);
-                match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)
+                {
                     Ok(_) => Ok(Some(LockGuard(path.to_path_buf()))),
                     Err(_) => Ok(None),
                 }
@@ -53,12 +59,20 @@ fn acquire_lock(path: &Path) -> std::io::Result<Option<LockGuard>> {
 pub fn drain(cfg: &SenderConfig) -> Result<DrainReport, SenderError> {
     let lock_path = cfg.queue_path.with_extension("lock");
     let Some(_guard) = acquire_lock(&lock_path)? else {
-        return Ok(DrainReport { sent: 0, remaining: 0, skipped_lock: true });
+        return Ok(DrainReport {
+            sent: 0,
+            remaining: 0,
+            skipped_lock: true,
+        });
     };
 
     let lines = queue::read_lines(&cfg.queue_path)?;
     if lines.is_empty() {
-        return Ok(DrainReport { sent: 0, remaining: 0, skipped_lock: false });
+        return Ok(DrainReport {
+            sent: 0,
+            remaining: 0,
+            skipped_lock: false,
+        });
     }
     // unparseable lines are dropped permanently (they can never send)
     let events: Vec<QueuedEvent> = lines
@@ -82,5 +96,9 @@ pub fn drain(cfg: &SenderConfig) -> Result<DrainReport, SenderError> {
         .map(|e| serde_json::to_string(e).expect("QueuedEvent serializes"))
         .collect();
     queue::rewrite_atomic(&cfg.queue_path, &remaining)?;
-    Ok(DrainReport { sent, remaining: remaining.len(), skipped_lock: false })
+    Ok(DrainReport {
+        sent,
+        remaining: remaining.len(),
+        skipped_lock: false,
+    })
 }

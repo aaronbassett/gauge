@@ -47,19 +47,31 @@ pub fn enqueue(
 fn str_kv(key: &str, v: &str) -> KeyValue {
     KeyValue {
         key: key.into(),
-        value: AnyValue { string_value: Some(v.into()), ..Default::default() },
+        value: AnyValue {
+            string_value: Some(v.into()),
+            ..Default::default()
+        },
     }
 }
 
 fn value_to_any(v: &Value) -> AnyValue {
     match v {
-        Value::String(s) => AnyValue { string_value: Some(s.clone()), ..Default::default() },
-        Value::Bool(b) => AnyValue { bool_value: Some(*b), ..Default::default() },
+        Value::String(s) => AnyValue {
+            string_value: Some(s.clone()),
+            ..Default::default()
+        },
+        Value::Bool(b) => AnyValue {
+            bool_value: Some(*b),
+            ..Default::default()
+        },
         Value::Number(n) if n.is_i64() => AnyValue {
             int_value: Some(n.as_i64().unwrap_or(0).to_string()),
             ..Default::default()
         },
-        Value::Number(n) => AnyValue { double_value: n.as_f64(), ..Default::default() },
+        Value::Number(n) => AnyValue {
+            double_value: n.as_f64(),
+            ..Default::default()
+        },
         // non-scalars never come from enqueue(); encode defensively as nothing
         _ => AnyValue::default(),
     }
@@ -80,11 +92,10 @@ pub fn encode_batch(cfg: &SenderConfig, events: &[QueuedEvent]) -> ExportLogsSer
         .iter()
         .map(|e| {
             let mut attributes = vec![str_kv("event.name", &e.event_name)];
-            attributes.extend(
-                e.attributes
-                    .iter()
-                    .map(|(k, v)| KeyValue { key: k.clone(), value: value_to_any(v) }),
-            );
+            attributes.extend(e.attributes.iter().map(|(k, v)| KeyValue {
+                key: k.clone(),
+                value: value_to_any(v),
+            }));
             LogRecord {
                 time_unix_nano: Some(e.time_unix_nano),
                 event_name: Some(e.event_name.clone()),

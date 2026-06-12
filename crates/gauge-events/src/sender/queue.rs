@@ -42,7 +42,11 @@ pub fn append_line(path: &Path, line: &str) -> std::io::Result<AppendOutcome> {
 
 pub fn read_lines(path: &Path) -> std::io::Result<Vec<String>> {
     match std::fs::read_to_string(path) {
-        Ok(s) => Ok(s.lines().map(str::to_string).filter(|l| !l.is_empty()).collect()),
+        Ok(s) => Ok(s
+            .lines()
+            .map(str::to_string)
+            .filter(|l| !l.is_empty())
+            .collect()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(vec![]),
         Err(e) => Err(e),
     }
@@ -74,8 +78,14 @@ mod tests {
     fn append_then_read_round_trips() {
         let tmp = tempfile::tempdir().unwrap();
         let q = tmp.path().join("queue.jsonl");
-        assert!(matches!(append_line(&q, "{\"a\":1}").unwrap(), AppendOutcome::Appended));
-        assert!(matches!(append_line(&q, "{\"b\":2}").unwrap(), AppendOutcome::Appended));
+        assert!(matches!(
+            append_line(&q, "{\"a\":1}").unwrap(),
+            AppendOutcome::Appended
+        ));
+        assert!(matches!(
+            append_line(&q, "{\"b\":2}").unwrap(),
+            AppendOutcome::Appended
+        ));
         assert_eq!(read_lines(&q).unwrap(), vec!["{\"a\":1}", "{\"b\":2}"]);
     }
 
@@ -84,7 +94,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let q = tmp.path().join("queue.jsonl");
         let big = "x".repeat(MAX_LINE_BYTES + 1);
-        assert!(matches!(append_line(&q, &big).unwrap(), AppendOutcome::DroppedTooLong));
+        assert!(matches!(
+            append_line(&q, &big).unwrap(),
+            AppendOutcome::DroppedTooLong
+        ));
         assert!(read_lines(&q).unwrap().is_empty());
     }
 
@@ -122,6 +135,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let q = tmp.path().join("queue.jsonl");
         append_line(&q, "z").unwrap();
-        assert_eq!(std::fs::metadata(&q).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&q).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }
