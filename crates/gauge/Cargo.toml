@@ -19,6 +19,9 @@ base64.workspace = true
 toml.workspace = true
 schemars.workspace = true
 rmcp.workspace = true
+ratatui.workspace = true
+crossterm = { workspace = true, features = ["event-stream"] }
+futures = "0.3"
 
 [dev-dependencies]
 wiremock.workspace = true
