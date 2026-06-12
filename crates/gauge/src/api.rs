@@ -57,19 +57,39 @@ impl ApiClient {
     pub async fn login(&self) -> Result<TokenCache, ClientError> {
         let kp = keys::load_keypair(&self.user_id)?;
         let ch: ChallengeResponse = self
-            .post_unauthed("/v1/auth/challenge", &ChallengeRequest { user_id: self.user_id.clone() })
+            .post_unauthed(
+                "/v1/auth/challenge",
+                &ChallengeRequest {
+                    user_id: self.user_id.clone(),
+                },
+            )
             .await?;
         let signature_b64 = sign_challenge(&kp, &ch.nonce_b64)?;
         let v: VerifyResponse = self
-            .post_unauthed("/v1/auth/verify", &VerifyRequest { challenge_id: ch.challenge_id, signature_b64 })
+            .post_unauthed(
+                "/v1/auth/verify",
+                &VerifyRequest {
+                    challenge_id: ch.challenge_id,
+                    signature_b64,
+                },
+            )
             .await?;
-        let cache = TokenCache { token: v.token, user_id: v.user_id, expires_at: v.expires_at };
+        let cache = TokenCache {
+            token: v.token,
+            user_id: v.user_id,
+            expires_at: v.expires_at,
+        };
         cache.save()?;
         Ok(cache)
     }
 
     pub async fn query(&self, req: &QueryRequest) -> Result<QueryResponse, ClientError> {
-        self.authed(reqwest::Method::POST, "/v1/query", Some(serde_json::to_value(req)?)).await
+        self.authed(
+            reqwest::Method::POST,
+            "/v1/query",
+            Some(serde_json::to_value(req)?),
+        )
+        .await
     }
 
     pub async fn meta(&self) -> Result<MetaResponse, ClientError> {
@@ -102,7 +122,10 @@ impl ApiClient {
             if let Some(b) = &body {
                 req = req.json(b);
             }
-            let resp = req.send().await.map_err(|e| ClientError::Http(e.to_string()))?;
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| ClientError::Http(e.to_string()))?;
             if resp.status().as_u16() == 401 && attempt == 0 {
                 token = self.login().await?.token; // expired mid-session: transparent re-auth
                 continue;
@@ -129,7 +152,10 @@ impl ApiClient {
 
     async fn handle<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T, ClientError> {
         let status = resp.status().as_u16();
-        let bytes = resp.bytes().await.map_err(|e| ClientError::Http(e.to_string()))?;
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ClientError::Http(e.to_string()))?;
         if (200..300).contains(&status) {
             return Ok(serde_json::from_slice(&bytes)?);
         }
@@ -144,6 +170,11 @@ impl ApiClient {
             message: format!("HTTP {status}"),
             remediation: None,
         });
-        Err(ClientError::Api { status, code: env.code, message: env.message, remediation: env.remediation })
+        Err(ClientError::Api {
+            status,
+            code: env.code,
+            message: env.message,
+            remediation: env.remediation,
+        })
     }
 }

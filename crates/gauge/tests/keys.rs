@@ -26,6 +26,9 @@ fn generate_writes_0600_key_and_returns_wire_pubkey() {
     assert_eq!(kp.public_wire(), wire);
 
     // refuses overwrite
-    assert!(matches!(gauge::keys::generate("alice"), Err(gauge::error::ClientError::KeyExists(_))));
+    assert!(matches!(
+        gauge::keys::generate("alice"),
+        Err(gauge::error::ClientError::KeyExists(_))
+    ));
     unsafe { std::env::remove_var("GAUGE_CONFIG_DIR") };
 }

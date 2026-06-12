@@ -35,6 +35,8 @@ pub fn load_keypair(user_id: &str) -> Result<Keypair, ClientError> {
     let path = paths::key_path(user_id)?;
     let b64 = std::fs::read_to_string(&path).map_err(|_| ClientError::KeyMissing(path))?;
     let bytes = b64_decode_flexible(b64.trim())?;
-    let seed: [u8; 32] = bytes.try_into().map_err(|_| ClientError::Auth(AuthError::InvalidLength))?;
+    let seed: [u8; 32] = bytes
+        .try_into()
+        .map_err(|_| ClientError::Auth(AuthError::InvalidLength))?;
     Ok(Keypair::from_seed(&seed))
 }

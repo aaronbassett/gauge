@@ -3,7 +3,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ClientError {
-    #[error("could not determine a config directory (set GAUGE_CONFIG_DIR, XDG_CONFIG_HOME, or HOME)")]
+    #[error(
+        "could not determine a config directory (set GAUGE_CONFIG_DIR, XDG_CONFIG_HOME, or HOME)"
+    )]
     NoConfigDir,
     #[error("missing config file {0} — create it with server_url and user_id")]
     ConfigMissing(PathBuf),
@@ -18,7 +20,12 @@ pub enum ClientError {
     #[error("http error: {0}")]
     Http(String),
     #[error("server error {status} ({code}): {message}{}", remediation.as_deref().map(|r| format!(" — {r}")).unwrap_or_default())]
-    Api { status: u16, code: String, message: String, remediation: Option<String> },
+    Api {
+        status: u16,
+        code: String,
+        message: String,
+        remediation: Option<String>,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
