@@ -35,8 +35,7 @@ pub struct UserStore {
 
 impl UserStore {
     pub fn from_toml_str(s: &str) -> Result<Self, AuthError> {
-        let file: UserFile =
-            toml::from_str(s).map_err(|e| AuthError::UserStore(e.to_string()))?;
+        let file: UserFile = toml::from_str(s).map_err(|e| AuthError::UserStore(e.to_string()))?;
         if file.schema_version != 1 {
             return Err(AuthError::UserStore(format!(
                 "unsupported schema_version {}",
@@ -107,7 +106,10 @@ note = "test user"
     fn rejects_duplicate_user_id() {
         let kp = Keypair::generate();
         let one = toml_for("alice", &kp.public_wire());
-        let dup = format!("{one}\n[[users]]\nuser_id = \"alice\"\nrole = \"viewer\"\npublic_key = \"{}\"\n", kp.public_wire());
+        let dup = format!(
+            "{one}\n[[users]]\nuser_id = \"alice\"\nrole = \"viewer\"\npublic_key = \"{}\"\n",
+            kp.public_wire()
+        );
         assert!(UserStore::from_toml_str(&dup).is_err());
     }
 

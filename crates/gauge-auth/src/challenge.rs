@@ -57,7 +57,10 @@ impl ChallengeStore {
     }
 
     pub fn purge_expired(&self, now: OffsetDateTime) {
-        self.inner.lock().unwrap().retain(|_, c| c.expires_at >= now);
+        self.inner
+            .lock()
+            .unwrap()
+            .retain(|_, c| c.expires_at >= now);
     }
 }
 
@@ -74,7 +77,9 @@ mod tests {
         let c = store.mint("alice", T0);
         assert_eq!(c.user_id, "alice");
         assert_eq!(c.expires_at, T0 + CHALLENGE_TTL);
-        let consumed = store.consume(&c.challenge_id, T0 + time::Duration::seconds(30)).unwrap();
+        let consumed = store
+            .consume(&c.challenge_id, T0 + time::Duration::seconds(30))
+            .unwrap();
         assert_eq!(consumed.nonce, c.nonce);
     }
 
@@ -94,8 +99,14 @@ mod tests {
         let store = ChallengeStore::new();
         let c = store.mint("alice", T0);
         let late = T0 + CHALLENGE_TTL + time::Duration::seconds(1);
-        assert!(matches!(store.consume(&c.challenge_id, late), Err(AuthError::ChallengeExpired)));
-        assert!(matches!(store.consume(&c.challenge_id, T0), Err(AuthError::ChallengeNotFound)));
+        assert!(matches!(
+            store.consume(&c.challenge_id, late),
+            Err(AuthError::ChallengeExpired)
+        ));
+        assert!(matches!(
+            store.consume(&c.challenge_id, T0),
+            Err(AuthError::ChallengeNotFound)
+        ));
     }
 
     #[test]

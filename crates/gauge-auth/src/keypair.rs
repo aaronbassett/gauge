@@ -36,7 +36,8 @@ impl Keypair {
 pub fn verify_signature(key: &VerifyingKey, msg: &[u8], sig: &[u8]) -> Result<(), AuthError> {
     let sig: [u8; SIGNATURE_LEN] = sig.try_into().map_err(|_| AuthError::InvalidLength)?;
     let sig = Signature::from_bytes(&sig);
-    key.verify(msg, &sig).map_err(|_| AuthError::InvalidSignature)
+    key.verify(msg, &sig)
+        .map_err(|_| AuthError::InvalidSignature)
 }
 
 #[cfg(test)]

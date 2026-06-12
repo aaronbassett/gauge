@@ -19,7 +19,6 @@ pub fn sign_challenge(keypair: &Keypair, nonce_b64: &str) -> Result<String, Auth
 mod tests {
     use super::*;
     use crate::keypair::{Keypair, verify_signature};
-    use base64::Engine as _;
 
     #[test]
     fn sign_challenge_produces_verifiable_signature() {
@@ -35,6 +34,9 @@ mod tests {
     fn sign_challenge_rejects_wrong_nonce_length() {
         let kp = Keypair::generate();
         let short = base64::engine::general_purpose::STANDARD_NO_PAD.encode([1u8; 8]);
-        assert!(matches!(sign_challenge(&kp, &short), Err(AuthError::InvalidLength)));
+        assert!(matches!(
+            sign_challenge(&kp, &short),
+            Err(AuthError::InvalidLength)
+        ));
     }
 }

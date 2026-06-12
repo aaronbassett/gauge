@@ -79,7 +79,10 @@ mod tests {
 
     #[test]
     fn rejects_short_secret() {
-        assert!(matches!(SigningSecret::new(vec![7u8; 31]), Err(AuthError::SecretTooShort)));
+        assert!(matches!(
+            SigningSecret::new(vec![7u8; 31]),
+            Err(AuthError::SecretTooShort)
+        ));
     }
 
     #[test]
@@ -95,7 +98,8 @@ mod tests {
 
     #[test]
     fn tampered_token_fails() {
-        let (token, _) = mint_token(&secret(), "alice", Role::Admin, OffsetDateTime::now_utc()).unwrap();
+        let (token, _) =
+            mint_token(&secret(), "alice", Role::Admin, OffsetDateTime::now_utc()).unwrap();
         let mut tampered = token.clone();
         tampered.push('x');
         assert!(verify_token(&secret(), &tampered).is_err());
@@ -103,7 +107,8 @@ mod tests {
 
     #[test]
     fn wrong_secret_fails() {
-        let (token, _) = mint_token(&secret(), "alice", Role::Admin, OffsetDateTime::now_utc()).unwrap();
+        let (token, _) =
+            mint_token(&secret(), "alice", Role::Admin, OffsetDateTime::now_utc()).unwrap();
         let other = SigningSecret::new(vec![9u8; 32]).unwrap();
         assert!(verify_token(&other, &token).is_err());
     }

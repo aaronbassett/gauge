@@ -27,7 +27,10 @@ pub fn parse_public_key_wire(wire: &str) -> Result<VerifyingKey, AuthError> {
 }
 
 pub fn format_public_key_wire(key: &VerifyingKey) -> String {
-    format!("{ED25519_WIRE_PREFIX}{}", STANDARD_NO_PAD.encode(key.as_bytes()))
+    format!(
+        "{ED25519_WIRE_PREFIX}{}",
+        STANDARD_NO_PAD.encode(key.as_bytes())
+    )
 }
 
 #[cfg(test)]
@@ -36,17 +39,26 @@ mod tests {
 
     #[test]
     fn parse_rejects_missing_prefix() {
-        assert!(matches!(parse_public_key_wire("AAAA"), Err(AuthError::InvalidWireFormat)));
+        assert!(matches!(
+            parse_public_key_wire("AAAA"),
+            Err(AuthError::InvalidWireFormat)
+        ));
     }
 
     #[test]
     fn parse_rejects_wrong_length() {
-        assert!(matches!(parse_public_key_wire("ed25519:AAAA"), Err(AuthError::InvalidLength)));
+        assert!(matches!(
+            parse_public_key_wire("ed25519:AAAA"),
+            Err(AuthError::InvalidLength)
+        ));
     }
 
     #[test]
     fn parse_rejects_bad_base64() {
-        assert!(matches!(parse_public_key_wire("ed25519:!!!not-base64!!!"), Err(AuthError::Base64)));
+        assert!(matches!(
+            parse_public_key_wire("ed25519:!!!not-base64!!!"),
+            Err(AuthError::Base64)
+        ));
     }
 
     #[test]
