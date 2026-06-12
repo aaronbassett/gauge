@@ -54,7 +54,13 @@ async fn main() {
                 println!("public_key = \"{wire}\"");
             }).map_err(Into::into)
         }
-        Cmd::Login => todo_stub("login", ""),
+        Cmd::Login => async {
+            let cfg = gauge::config::ClientConfig::load().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            let api = gauge::api::ApiClient::from_config(&cfg);
+            let cache = api.login().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            println!("logged in as {} (token expires at unix {})", cache.user_id, cache.expires_at);
+            Ok(())
+        }.await,
         Cmd::Query { request } => todo_stub("query", &request),
         Cmd::Tui => todo_stub("tui", ""),
         Cmd::Mcp { cmd: McpCmd::Serve } => todo_stub("mcp serve", ""),
