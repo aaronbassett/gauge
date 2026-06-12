@@ -4,6 +4,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use gauge_auth::{ChallengeStore, Keypair, SigningSecret, UserStore};
+use gauge_server::middleware::rate_limit::Limiters;
 use gauge_server::state::AppState;
 use sqlx::PgPool;
 use tower::ServiceExt as _;
@@ -23,6 +24,7 @@ pub fn test_state(pool: PgPool) -> (AppState, Keypair) {
         users: Arc::new(UserStore::from_toml_str(&toml).unwrap()),
         challenges: Arc::new(ChallengeStore::new()),
         secret: Arc::new(SigningSecret::new(TEST_SECRET.to_vec()).unwrap()),
+        limiters: Arc::new(Limiters::new(100_000, 100_000, 100_000)),
     };
     (state, kp)
 }
