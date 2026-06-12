@@ -25,3 +25,4 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+tower = { workspace = true, features = ["util"] }
