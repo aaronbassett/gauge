@@ -17,6 +17,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/auth/verify", post(routes::auth::verify));
     let protected = Router::new()
         .route("/v1/query", post(routes::query::query))
+        .route("/v1/meta", get(routes::meta::meta))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::bearer::require_bearer,
