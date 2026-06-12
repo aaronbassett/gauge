@@ -1,0 +1,33 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "tome" } },
+          { "key": "service.version", "value": { "stringValue": "0.6.0" } },
+          { "key": "service.instance.id", "value": { "stringValue": "0b9c1f2e-3a4d-4b6c-8e1f-2a3b4c5d6e7f" } },
+          { "key": "session.id", "value": { "stringValue": "7f6e5d4c-3b2a-4f1e-9c8b-1a2b3c4d5e6f" } },
+          { "key": "os.type", "value": { "stringValue": "darwin" } },
+          { "key": "host.arch", "value": { "stringValue": "arm64" } }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "timeUnixNano": "1781430705123000000",
+              "eventName": "tome.search",
+              "attributes": [
+                { "key": "event.name", "value": { "stringValue": "tome.search" } },
+                { "key": "surface", "value": { "stringValue": "cli" } },
+                { "key": "latency_bucket", "value": { "stringValue": "50-200ms" } },
+                { "key": "reranker_used", "value": { "boolValue": true } },
+                { "key": "candidates_returned", "value": { "intValue": "12" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
