@@ -1,0 +1,5 @@
+---
+source: crates/gauge-server/src/sqlbuild.rs
+expression: "build(&req, NOW).unwrap().sql"
+---
+SELECT os AS "os", COUNT(*) AS "count" FROM events WHERE time >= $1 AND time < $2 AND event_name = ANY($3) AND attributes ? $5 GROUP BY 1 LIMIT 1001
