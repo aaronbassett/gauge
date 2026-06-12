@@ -27,6 +27,17 @@
 - 2026-06-12: Initial plan written.
 - 2026-06-12 (execution): Began autonomous subagent-driven execution. Drift log accumulates here; consolidated at each phase gate.
   - Task 1: pinned `time = "=0.3.47"` (workspace dep). `time 0.3.48` (edition 2024) adds a blanket impl that conflicts (E0119) with `sqlx-core 0.8.6`'s `impl<T> From<T> for Json<T>`. Pin keeps `sqlx 0.8` + `rust-version 1.93`. Revisit if sqlx 0.8.x patches or we move to sqlx 0.9 (needs Rust ≥1.94).
+- 2026-06-12 — **PHASE GATE 1 → 2 passed.** Full suite green: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` → **84 tests pass** (gauge-auth 27, gauge-events 15, gauge-query 7, gauge-server 35). Phase 1 delivered via PRs #1–#9 (all squash-merged, CI green). Consolidated Phase-1 drift & decisions:
+  - **time pin** (Task 1) — as above; carried by the workspace, inherited by all crates.
+  - **UserStore Debug** (Task 4) — added `#[derive(Debug)]` (test `.unwrap_err()` needs `T: Debug`; struct holds only public wire keys/roles/ids). Benign.
+  - **gauge-auth review hardening** (Tasks 2–6) — documented `seed()` as enrollment-only/non-logging; added invalid-curve-point + schema_version=0 tests; `nbf` note. (`Zeroizing<[u8;32]>` deferred to avoid rippling into the `gauge keys` `[u8;32]` consumers — recommend for a future pass.)
+  - **tower `util`** (Task 11) — added to gauge-server `[dev-dependencies]` for `ServiceExt::oneshot` in the integration harness.
+  - **sqlbuild exists-filter fix** (Task 16) — the `exists` arm called `field_expr()` (pushing an attr-key bind it then discarded) before building `attributes ? $N`, leaving a gap in `$N` numbering (worked only because sqlx sends explicit param types and PG tolerates an unused param; verified end-to-end). Moved `field_expr()` into the value-comparison arms; added `exists_filter_executes_end_to_end` to guard the path against real Postgres (snapshot test is text-only).
+  - **auth review** (Tasks 13–15) — 401 `challenge_expired` and ingest `e.to_string()` are both verbatim plan design; addressed the real gap (coverage) with `expired_challenge_is_401` + `empty_bearer_token_is_401` pin tests rather than overriding approved design.
+  - **canary hardening** (Task 20) — added a non-vacuous-capture assertion (`logs.contains("ingest")`) so the log-leak canary cannot pass on an empty/un-wired capture. Both canaries pass unmodified.
+  - **No drift** in axum 0.8 / sqlx 0.8 / tower-http 0.6 / tracing-subscriber 0.3 / schemars 1 / insta 1 — the plan's code compiled verbatim against all of them.
+  - **Deploy DEFERRED TO HUMAN** (the single permitted deferral). `fly` is authenticated locally, but `fly deploy` provisions billable infra (Fly Managed Postgres + an always-on machine) and a public endpoint — an outward-facing, billing-bearing action that should be a human's call. Deploy-readiness fully verified locally: `Dockerfile.server` builds a 60.3 MB distroless image; the release binary boots against Postgres, runs migrations, and serves `/healthz`=200, `/readyz`=200, ingests the SPEC example (200, `accepted:1`), and 401s unauthenticated `/v1/query`. Runbook ready at `docs/deploy.md`.
+  - **Phase 2/3 forward review (re-read against learnings):** No task-step edits required. Client/sender task code references **workspace** deps, so the `time` pin and all resolved versions flow through automatically. **Version-drift heads-up for Phase 2 (recorded, no action — pins intentional):** latest published `rmcp` is **1.7.0** (plan pins `0.6`; `0.6.4` is the resolved tip — the macro API changed across majors, so Task 27 should follow its existing rmcp-drift warning and adapt within 0.6.x), `ratatui` **0.30.1** (plan `0.29`), `crossterm` **0.29.0** (plan `0.28`). Workspace reqs hold these at the plan's assumed series; a future major upgrade (rmcp 1.x / ratatui 0.30) is recommended but out of scope for this plan.
 
 ### Implementation progress (durable recovery ledger)
 
@@ -52,8 +63,8 @@
 - [x] Task 18 — gauge-server: GET /v1/meta (PR #7)
 - [ ] Task 19 — gauge-server: rate limiting
 - [ ] Task 20 — gauge-server: privacy canary tests
-- [ ] Task 21 — Deployment: Dockerfile, fly.toml, runbook
-- [ ] PHASE GATE 1 → 2
+- [x] Task 21 — Deployment: Dockerfile, fly.toml, runbook (PR #9)
+- [x] PHASE GATE 1 → 2 (suite green @ 84 tests; deploy deferred to human)
 - [ ] Task 22 — gauge: CLI scaffold, paths, config, error
 - [ ] Task 23 — gauge: keys generate
 - [ ] Task 24 — gauge: ApiClient (login, token cache, 401 retry)
@@ -4485,11 +4496,11 @@ git commit -m "feat(deploy): Dockerfile, fly.toml, and deploy runbook"
 
 ## PHASE GATE 1 → 2
 
-- [ ] Run `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace` — all green.
-- [ ] (Optional but recommended) Execute `docs/deploy.md` once for real; confirm `/healthz`, a curl OTLP POST of the SPEC.md worked example, and a full auth handshake against the deployed app.
-- [ ] Re-read Phases 2 and 3 below against everything learned in Phase 1 (actual crate versions resolved, axum/sqlx API drift, any renamed types or modules). Edit the affected task steps in this document so they match reality.
-- [ ] Update the Plan changelog at the top of this file (gate passed; what was revised and why, or "unmodified").
-- [ ] Commit: `git add docs/superpowers/plans && git commit -m "docs: phase 1 gate review of implementation plan"`
+- [x] Run `cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo test --workspace --all-features` — all green (**84 tests**).
+- [x] (Optional but recommended) Execute `docs/deploy.md` once for real — **DEFERRED TO HUMAN** (live `fly deploy` provisions billable Fly infra + a public endpoint). Deploy-readiness verified locally instead: Docker image builds (60.3 MB distroless); release binary serves `/healthz`=200, `/readyz`=200, ingests the SPEC worked example (200, `accepted:1`), and 401s unauthenticated `/v1/query`, against local Postgres. See changelog.
+- [x] Re-read Phases 2 and 3 against Phase-1 learnings — no task-step edits required (client/sender tasks use workspace deps; version pins hold). Version-drift heads-up for rmcp/ratatui/crossterm recorded in the changelog.
+- [x] Plan changelog updated (Phase Gate 1 consolidation entry above).
+- [x] Committed as part of the gate revision.
 
 ---
 
