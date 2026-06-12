@@ -195,7 +195,7 @@ statement timeout.
 - **Dimensions:** `app`, `event_name`, `app_version`, `os`, `arch`, `attr.<key>`
   (`attributes->>'<key>'`), plus a time bucket when `granularity` is set (`date_trunc`)
 - **Filters:** `eq` / `neq` / `in` / `exists` over the same fields
-- **Time range:** relative (`{"last": "7d"}` — hours/days) or absolute (`{from, to}` RFC3339)
+- **Time range:** relative (`{"last": "<N>h" | "<N>d"}`) or absolute (`{from, to}` RFC3339)
 - **Granularity:** `hour` | `day` | `week`
 - **Order/limit:** order by any selected measure/dimension; limit default 1,000, hard cap 10,000;
   response flags truncation
@@ -242,8 +242,9 @@ POST /v1/query
 
 ### Rate limiting & config
 
-Per-IP in-memory token buckets (e.g. `governor`): generous on `/v1/logs`, tight on `/v1/auth/*`;
-429 + `Retry-After`. Authenticated endpoints get light per-user limits.
+Per-IP in-memory token buckets (e.g. `governor`); 429 + `Retry-After`. Defaults (env-overridable):
+`/v1/logs` 60 req/min/IP (burst 120); `/v1/auth/*` 10 req/min/IP; `/v1/query` + `/v1/meta`
+120 req/min per authenticated user.
 
 | Env var | Purpose |
 |---|---|
@@ -282,7 +283,7 @@ Fixed pages in v1:
 1. **Overview** — events-over-time braille chart (per-app series); big-number tiles (events today;
    unique installs 24h / 7d / 30d); top event types bar chart; apps summary table (events, uniques,
    last seen).
-2. **App detail** (one page per allowlisted app) — event-type breakdown, version distribution,
+2. **App detail** (one page per app reported by `/v1/meta`) — event-type breakdown, version distribution,
    os/arch split, per-event-type sparklines.
 3. **Explore** — interactive query builder over the DSL: pick measures/dimensions/filters from
    `/v1/meta` values; results as table or bar chart.
@@ -337,8 +338,8 @@ protocol failures. CLI subcommands exit nonzero with human-readable messages.
 ## 9. Key dependencies
 
 axum, tokio, tower, sqlx (postgres, runtime-tokio, tls-rustls, migrate), serde/serde_json,
-reqwest (rustls, no default features), ed25519-dalek + rand_core/getrandom, a JWT implementation
-(jsonwebtoken or hand-rolled HS256 as in mn-auth — pinned at implementation), uuid, time,
+reqwest (rustls, no default features), ed25519-dalek + rand_core/getrandom, jsonwebtoken (HS256),
+uuid, time,
 governor, thiserror, tracing/tracing-subscriber, ratatui + crossterm, rmcp, schemars;
 dev: insta (snapshots), wiremock.
 
