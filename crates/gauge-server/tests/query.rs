@@ -12,24 +12,42 @@ use uuid::Uuid;
 async fn seed(pool: &PgPool) {
     let now = OffsetDateTime::now_utc();
     // two installs for tome, one for midnight-manual
-    for (app, install, n_search) in [("tome", Uuid::new_v4(), 3), ("tome", Uuid::new_v4(), 1), ("midnight-manual", Uuid::new_v4(), 2)] {
+    for (app, install, n_search) in [
+        ("tome", Uuid::new_v4(), 3),
+        ("tome", Uuid::new_v4(), 1),
+        ("midnight-manual", Uuid::new_v4(), 2),
+    ] {
         let res = ResourceInfo {
-            app: app.into(), app_version: "0.1.0".into(),
-            install_id: install, session_id: Uuid::new_v4(),
-            os: "darwin".into(), arch: "arm64".into(),
+            app: app.into(),
+            app_version: "0.1.0".into(),
+            install_id: install,
+            session_id: Uuid::new_v4(),
+            os: "darwin".into(),
+            arch: "arm64".into(),
         };
         let mut events = Vec::new();
         for _ in 0..n_search {
             let mut attributes = serde_json::Map::new();
             attributes.insert("surface".into(), serde_json::json!("cli"));
-            events.push(ParsedEvent { event_name: format!("{app}.search"), time: now, attributes });
+            events.push(ParsedEvent {
+                event_name: format!("{app}.search"),
+                time: now,
+                attributes,
+            });
         }
         db::insert_events(pool, &res, &events).await.unwrap();
     }
 }
 
 fn token(state: &gauge_server::state::AppState) -> String {
-    mint_token(&state.secret, "alice", Role::Admin, OffsetDateTime::now_utc()).unwrap().0
+    mint_token(
+        &state.secret,
+        "alice",
+        Role::Admin,
+        OffsetDateTime::now_utc(),
+    )
+    .unwrap()
+    .0
 }
 
 #[sqlx::test(migrations = "../../migrations")]

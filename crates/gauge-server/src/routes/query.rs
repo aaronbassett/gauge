@@ -22,15 +22,22 @@ pub async fn query(
     Extension(_ctx): Extension<AuthContext>,
     body: Bytes,
 ) -> Result<Json<QueryResponse>, ApiError> {
-    let req: QueryRequest = serde_json::from_slice(&body)
-        .map_err(|e| ApiError::unprocessable("invalid_query", format!("invalid query request: {e}")))?;
+    let req: QueryRequest = serde_json::from_slice(&body).map_err(|e| {
+        ApiError::unprocessable("invalid_query", format!("invalid query request: {e}"))
+    })?;
     let started = std::time::Instant::now();
     let built = sqlbuild::build(&req, OffsetDateTime::now_utc())
         .map_err(|e| ApiError::unprocessable("invalid_query", e.to_string()))?;
 
     let mut tx = st.pool.begin().await.map_err(db_unavailable)?;
-    sqlx::query("SET TRANSACTION READ ONLY").execute(&mut *tx).await.map_err(db_unavailable)?;
-    sqlx::query("SET LOCAL statement_timeout = '5s'").execute(&mut *tx).await.map_err(db_unavailable)?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .map_err(db_unavailable)?;
+    sqlx::query("SET LOCAL statement_timeout = '5s'")
+        .execute(&mut *tx)
+        .await
+        .map_err(db_unavailable)?;
 
     let mut q = sqlx::query(&built.sql);
     for b in &built.binds {
@@ -66,7 +73,9 @@ pub async fn query(
                     .try_get::<OffsetDateTime, _>(col.alias.as_str())
                     .map(|t| Value::String(t.format(&Rfc3339).unwrap_or_default())),
             }
-            .map_err(|_| ApiError::service_unavailable("row_decode", "failed to decode result row"))?;
+            .map_err(|_| {
+                ApiError::service_unavailable("row_decode", "failed to decode result row")
+            })?;
             obj.insert(col.alias.clone(), v);
         }
         out.push(Value::Object(obj));

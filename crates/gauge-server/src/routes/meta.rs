@@ -41,14 +41,17 @@ pub async fn meta(
     for row in &stats {
         let app: String = row.get("app");
         let fmt = |t: Option<OffsetDateTime>| t.and_then(|t| t.format(&Rfc3339).ok());
-        apps.insert(app.clone(), AppMeta {
-            app,
-            event_names: vec![],
-            attribute_keys: vec![],
-            first_event: fmt(row.get("first")),
-            last_event: fmt(row.get("last")),
-            total_events: row.get("total"),
-        });
+        apps.insert(
+            app.clone(),
+            AppMeta {
+                app,
+                event_names: vec![],
+                attribute_keys: vec![],
+                first_event: fmt(row.get("first")),
+                last_event: fmt(row.get("last")),
+                total_events: row.get("total"),
+            },
+        );
     }
     for row in &names {
         let app: String = row.get("app");
@@ -62,5 +65,7 @@ pub async fn meta(
             m.attribute_keys.push(row.get("key"));
         }
     }
-    Ok(Json(MetaResponse { apps: apps.into_values().collect() }))
+    Ok(Json(MetaResponse {
+        apps: apps.into_values().collect(),
+    }))
 }

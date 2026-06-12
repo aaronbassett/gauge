@@ -3,8 +3,8 @@
 //! (filter values, attr keys) is a bind parameter — never string-spliced.
 
 use gauge_query::{
-    DEFAULT_LIMIT, Dir, Field, FilterOp, FilterValue, MAX_LIMIT, Measure, QueryError,
-    QueryRequest, resolve_time_range, validate,
+    DEFAULT_LIMIT, Dir, Field, FilterOp, FilterValue, MAX_LIMIT, Measure, QueryError, QueryRequest,
+    resolve_time_range, validate,
 };
 use time::OffsetDateTime;
 
@@ -73,7 +73,10 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
             "date_trunc('{}', time) AS \"time_bucket\"",
             g.date_trunc_unit()
         ));
-        columns.push(ColSpec { alias: "time_bucket".into(), kind: ColKind::TimeBucket });
+        columns.push(ColSpec {
+            alias: "time_bucket".into(),
+            kind: ColKind::TimeBucket,
+        });
         group_count += 1;
     }
     for d in &req.dimensions {
@@ -81,7 +84,10 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
         let alias = d.to_string();
         let expr = field_expr(d, &mut binds);
         select.push(format!("{expr} AS \"{alias}\""));
-        columns.push(ColSpec { alias, kind: ColKind::Text });
+        columns.push(ColSpec {
+            alias,
+            kind: ColKind::Text,
+        });
         group_count += 1;
     }
     for m in &req.measures {
@@ -91,7 +97,10 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
             Measure::UniqueSessions => "COUNT(DISTINCT session_id)",
         };
         select.push(format!("{expr} AS \"{}\"", m.alias()));
-        columns.push(ColSpec { alias: m.alias().into(), kind: ColKind::Int });
+        columns.push(ColSpec {
+            alias: m.alias().into(),
+            kind: ColKind::Int,
+        });
     }
 
     for f in &req.filters {
@@ -110,7 +119,9 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
                 wheres.push(format!("{expr} = ANY({p})"));
             }
             (FilterOp::Exists, None) => {
-                let Field::Attr(k) = &f.field else { unreachable!("validated") };
+                let Field::Attr(k) = &f.field else {
+                    unreachable!("validated")
+                };
                 let p = ph(&mut binds, Bind::Text(k.clone()));
                 wheres.push(format!("attributes ? {p}"));
             }
@@ -142,7 +153,10 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
                 if !aliases.contains(&o.field.as_str()) {
                     return Err(QueryError::BadOrderField(o.field.clone()));
                 }
-                let dir = match o.dir { Dir::Asc => "ASC", Dir::Desc => "DESC" };
+                let dir = match o.dir {
+                    Dir::Asc => "ASC",
+                    Dir::Desc => "DESC",
+                };
                 Ok(format!("\"{}\" {dir}", o.field))
             })
             .collect::<Result<_, _>>()?
@@ -153,7 +167,12 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
 
     let limit = req.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     sql.push_str(&format!(" LIMIT {}", limit + 1)); // +1 row to detect truncation
-    Ok(BuiltQuery { sql, binds, columns, limit })
+    Ok(BuiltQuery {
+        sql,
+        binds,
+        columns,
+        limit,
+    })
 }
 
 #[cfg(test)]
@@ -190,9 +209,8 @@ mod tests {
 
     #[test]
     fn snapshot_minimal_count() {
-        let req: QueryRequest = serde_json::from_str(
-            r#"{"measures":["count"],"time_range":{"last":"24h"}}"#,
-        ).unwrap();
+        let req: QueryRequest =
+            serde_json::from_str(r#"{"measures":["count"],"time_range":{"last":"24h"}}"#).unwrap();
         insta::assert_snapshot!(build(&req, NOW).unwrap().sql);
     }
 
@@ -203,7 +221,8 @@ mod tests {
                 "filters":[{"field":"event_name","op":"in","value":["tome.search","tome.install"]},
                            {"field":"attr.surface","op":"exists"}],
                 "time_range":{"last":"30d"}}"#,
-        ).unwrap();
+        )
+        .unwrap();
         insta::assert_snapshot!(build(&req, NOW).unwrap().sql);
     }
 
@@ -219,7 +238,10 @@ mod tests {
     #[test]
     fn order_must_reference_selected_alias() {
         let mut req = spec_example();
-        req.order = vec![Order { field: "nope".into(), dir: Dir::Desc }];
+        req.order = vec![Order {
+            field: "nope".into(),
+            dir: Dir::Desc,
+        }];
         assert!(matches!(build(&req, NOW), Err(QueryError::BadOrderField(f)) if f == "nope"));
     }
 
