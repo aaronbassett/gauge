@@ -81,6 +81,14 @@ async fn ingest_path_never_logs_attribute_values(pool: PgPool) {
     assert_eq!(status, axum::http::StatusCode::OK);
 
     let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+    // Guard against a vacuous pass: prove the subscriber actually captured the
+    // ingest handler's output. The handler emits `tracing::info!(... "ingest")`,
+    // so an empty/un-wired capture (which would make the leak check meaningless)
+    // is caught here.
+    assert!(
+        logs.contains("ingest"),
+        "canary is vacuous: no ingest-path log was captured, so the leak check below proves nothing:\n{logs}"
+    );
     assert!(
         !logs.contains(CANARY),
         "ingest path logged an attribute value:\n{logs}"
