@@ -5,3 +5,4 @@ pub mod keys;
 pub mod mcp;
 pub mod paths;
 pub mod query_cmd;
+pub mod tui;

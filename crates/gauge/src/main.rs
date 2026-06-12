@@ -89,7 +89,15 @@ async fn main() {
             }
             .await
         }
-        Cmd::Tui => todo_stub("tui", ""),
+        Cmd::Tui => {
+            async {
+                let cfg = gauge::config::ClientConfig::load()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                let api = gauge::api::ApiClient::from_config(&cfg);
+                gauge::tui::run::run(api).await
+            }
+            .await
+        }
         Cmd::Mcp { cmd: McpCmd::Serve } => {
             async {
                 let cfg = gauge::config::ClientConfig::load()
@@ -104,8 +112,4 @@ async fn main() {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
-}
-
-fn todo_stub(name: &str, _arg: &str) -> Result<(), Box<dyn std::error::Error>> {
-    Err(format!("`gauge {name}` is not implemented yet (see implementation plan)").into())
 }
