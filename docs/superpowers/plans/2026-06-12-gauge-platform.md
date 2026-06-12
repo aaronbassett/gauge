@@ -38,9 +38,9 @@
 - [x] Task 4 — gauge-auth: user store (PR #2)
 - [x] Task 5 — gauge-auth: challenge store (PR #2)
 - [x] Task 6 — gauge-auth: JWT + protocol + client (PR #2)
-- [ ] Task 7 — gauge-events: OTLP wire types
-- [ ] Task 8 — gauge-events: Gauge profile validation
-- [ ] Task 9 — gauge-events: SPEC.md + pin test
+- [x] Task 7 — gauge-events: OTLP wire types (PR #3)
+- [x] Task 8 — gauge-events: Gauge profile validation (PR #3)
+- [x] Task 9 — gauge-events: SPEC.md + pin test (PR #3)
 - [ ] Task 10 — gauge-query: query DSL types
 - [ ] Task 11 — gauge-server: scaffold
 - [ ] Task 12 — gauge-server: events migration + batch insert
