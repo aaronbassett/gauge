@@ -1,6 +1,4 @@
-use gauge_query::{
-    AppMeta, Dir, Field, Granularity, Measure, Order, QueryRequest, TimeRange,
-};
+use gauge_query::{AppMeta, Dir, Field, Granularity, Measure, Order, QueryRequest, TimeRange};
 use time::OffsetDateTime;
 
 use crate::api::ApiClient;
@@ -65,7 +63,9 @@ fn base(w: TimeWindow) -> QueryRequest {
         measures: vec![Measure::Count],
         dimensions: vec![],
         filters: vec![],
-        time_range: TimeRange::Last { last: w.last().into() },
+        time_range: TimeRange::Last {
+            last: w.last().into(),
+        },
         granularity: None,
         order: vec![],
         limit: None,
@@ -83,9 +83,16 @@ pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientErr
         .rows;
     let totals = api
         .query(&QueryRequest {
-            measures: vec![Measure::Count, Measure::UniqueInstalls, Measure::UniqueSessions],
+            measures: vec![
+                Measure::Count,
+                Measure::UniqueInstalls,
+                Measure::UniqueSessions,
+            ],
             dimensions: vec![Field::App],
-            order: vec![Order { field: "app".into(), dir: Dir::Asc }],
+            order: vec![Order {
+                field: "app".into(),
+                dir: Dir::Asc,
+            }],
             ..base(w)
         })
         .await?
@@ -93,12 +100,22 @@ pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientErr
     let top_events = api
         .query(&QueryRequest {
             dimensions: vec![Field::EventName],
-            order: vec![Order { field: "count".into(), dir: Dir::Desc }],
+            order: vec![Order {
+                field: "count".into(),
+                dir: Dir::Desc,
+            }],
             limit: Some(10),
             ..base(w)
         })
         .await?
         .rows;
     let apps = api.meta().await?.apps;
-    Ok(Snapshot { fetched_at: OffsetDateTime::now_utc(), window: w, timeseries, totals, top_events, apps })
+    Ok(Snapshot {
+        fetched_at: OffsetDateTime::now_utc(),
+        window: w,
+        timeseries,
+        totals,
+        top_events,
+        apps,
+    })
 }

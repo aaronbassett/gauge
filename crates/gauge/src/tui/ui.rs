@@ -3,7 +3,9 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, GraphType, Paragraph, Row, Table};
+use ratatui::widgets::{
+    Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, GraphType, Paragraph, Row, Table,
+};
 
 use crate::tui::app::{App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, Page};
 
@@ -30,7 +32,9 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
     if let Some(reason) = &app.stale {
         spans.push(Span::styled(
             format!("  STALE: {reason}"),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -43,7 +47,11 @@ fn render_overview(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(34), Constraint::Percentage(33), Constraint::Percentage(33)])
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
         .split(rows[1]);
     render_timeseries(f, app, rows[0]);
     render_totals(f, app, bottom[0]);
@@ -51,22 +59,36 @@ fn render_overview(f: &mut Frame, app: &App, area: Rect) {
     render_apps_table(f, app, bottom[2]);
 }
 
-const SERIES_COLORS: &[Color] = &[Color::Cyan, Color::Magenta, Color::Yellow, Color::Green, Color::Blue];
+const SERIES_COLORS: &[Color] = &[
+    Color::Cyan,
+    Color::Magenta,
+    Color::Yellow,
+    Color::Green,
+    Color::Blue,
+];
 
 fn render_timeseries(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().borders(Borders::ALL).title("Events over time");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Events over time");
     let Some(snap) = &app.snapshot else {
         f.render_widget(Paragraph::new("loading…").block(block), area);
         return;
     };
     // group rows by app; x = index of sorted distinct time buckets
-    let mut buckets: Vec<&str> = snap.timeseries.iter().filter_map(|r| r["time_bucket"].as_str()).collect();
+    let mut buckets: Vec<&str> = snap
+        .timeseries
+        .iter()
+        .filter_map(|r| r["time_bucket"].as_str())
+        .collect();
     buckets.sort_unstable();
     buckets.dedup();
     let mut series: std::collections::BTreeMap<&str, Vec<(f64, f64)>> = Default::default();
     let mut y_max: f64 = 1.0;
     for row in &snap.timeseries {
-        let (Some(appn), Some(bucket)) = (row["app"].as_str(), row["time_bucket"].as_str()) else { continue };
+        let (Some(appn), Some(bucket)) = (row["app"].as_str(), row["time_bucket"].as_str()) else {
+            continue;
+        };
         let count = row["count"].as_i64().unwrap_or(0) as f64;
         y_max = y_max.max(count);
         let x = buckets.iter().position(|b| *b == bucket).unwrap_or(0) as f64;
@@ -88,15 +110,18 @@ fn render_timeseries(f: &mut Frame, app: &App, area: Rect) {
     let chart = Chart::new(datasets)
         .block(block)
         .x_axis(Axis::default().bounds([0.0, x_max]))
-        .y_axis(Axis::default().bounds([0.0, y_max * 1.1]).labels(vec![
-            Span::raw("0"),
-            Span::raw(format!("{}", y_max as i64)),
-        ]));
+        .y_axis(
+            Axis::default()
+                .bounds([0.0, y_max * 1.1])
+                .labels(vec![Span::raw("0"), Span::raw(format!("{}", y_max as i64))]),
+        );
     f.render_widget(chart, area);
 }
 
 fn render_totals(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().borders(Borders::ALL).title(format!("Unique installs ({})", app.window.label()));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!("Unique installs ({})", app.window.label()));
     let Some(snap) = &app.snapshot else {
         f.render_widget(block, area);
         return;
@@ -160,36 +185,61 @@ fn render_apps_table(f: &mut Frame, app: &App, area: Rect) {
         .collect();
     let table = Table::new(
         rows,
-        [Constraint::Min(16), Constraint::Length(10), Constraint::Length(8), Constraint::Min(20)],
+        [
+            Constraint::Min(16),
+            Constraint::Length(10),
+            Constraint::Length(8),
+            Constraint::Min(20),
+        ],
     )
-    .header(Row::new(vec!["app", "events", "types", "last seen"]).style(Style::default().add_modifier(Modifier::BOLD)))
+    .header(
+        Row::new(vec!["app", "events", "types", "last seen"])
+            .style(Style::default().add_modifier(Modifier::BOLD)),
+    )
     .block(block);
     f.render_widget(table, area);
 }
 
 fn render_apps(f: &mut Frame, app: &App, area: Rect) {
     // App detail: event-name breakdown for the selected app (←/→ to switch)
-    let block = Block::default().borders(Borders::ALL).title("App detail (←/→ to switch app)");
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("App detail (←/→ to switch app)");
     let Some(snap) = &app.snapshot else {
         f.render_widget(block, area);
         return;
     };
-    let Some(meta) = snap.apps.get(app.selected_app.min(snap.apps.len().saturating_sub(1))) else {
+    let Some(meta) = snap
+        .apps
+        .get(app.selected_app.min(snap.apps.len().saturating_sub(1)))
+    else {
         f.render_widget(Paragraph::new("no apps yet").block(block), area);
         return;
     };
     let mut lines = vec![
-        Line::from(Span::styled(meta.app.clone(), Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            meta.app.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
         Line::from(format!("total events: {}", meta.total_events)),
-        Line::from(format!("first: {}  last: {}",
+        Line::from(format!(
+            "first: {}  last: {}",
             meta.first_event.as_deref().unwrap_or("-"),
-            meta.last_event.as_deref().unwrap_or("-"))),
+            meta.last_event.as_deref().unwrap_or("-")
+        )),
         Line::from(""),
         Line::from("event types:"),
     ];
-    lines.extend(meta.event_names.iter().map(|n| Line::from(format!("  {n}"))));
+    lines.extend(
+        meta.event_names
+            .iter()
+            .map(|n| Line::from(format!("  {n}"))),
+    );
     lines.push(Line::from(""));
-    lines.push(Line::from(format!("attribute keys: {}", meta.attribute_keys.join(", "))));
+    lines.push(Line::from(format!(
+        "attribute keys: {}",
+        meta.attribute_keys.join(", ")
+    )));
     f.render_widget(Paragraph::new(lines).block(block), area);
 }
 
@@ -200,8 +250,7 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
     let picker = Paragraph::new(format!(
         "measure (↑): {}    dimension (↓): {}    enter: run",
-        EXPLORE_MEASURES[app.explore.measure_idx],
-        EXPLORE_DIMENSIONS[app.explore.dimension_idx],
+        EXPLORE_MEASURES[app.explore.measure_idx], EXPLORE_DIMENSIONS[app.explore.dimension_idx],
     ))
     .block(Block::default().borders(Borders::ALL).title("Explore"));
     f.render_widget(picker, chunks[0]);

@@ -72,14 +72,19 @@ impl App {
                 self.selected_app = self.selected_app.saturating_sub(1)
             }
             KeyCode::Right if self.page == Page::Apps => {
-                let max = self.snapshot.as_ref().map(|s| s.apps.len().saturating_sub(1)).unwrap_or(0);
+                let max = self
+                    .snapshot
+                    .as_ref()
+                    .map(|s| s.apps.len().saturating_sub(1))
+                    .unwrap_or(0);
                 self.selected_app = (self.selected_app + 1).min(max);
             }
             KeyCode::Up if self.page == Page::Explore => {
                 self.explore.measure_idx = (self.explore.measure_idx + 1) % EXPLORE_MEASURES.len()
             }
             KeyCode::Down if self.page == Page::Explore => {
-                self.explore.dimension_idx = (self.explore.dimension_idx + 1) % EXPLORE_DIMENSIONS.len()
+                self.explore.dimension_idx =
+                    (self.explore.dimension_idx + 1) % EXPLORE_DIMENSIONS.len()
             }
             KeyCode::Enter if self.page == Page::Explore => self.explore.run_requested = true,
             _ => {}

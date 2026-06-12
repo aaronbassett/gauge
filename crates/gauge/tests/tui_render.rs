@@ -12,11 +12,17 @@ fn synthetic_snapshot() -> Snapshot {
             serde_json::json!({"time_bucket": "2026-06-10T00:00:00Z", "app": "tome", "count": 5}),
             serde_json::json!({"time_bucket": "2026-06-11T00:00:00Z", "app": "tome", "count": 9}),
         ],
-        totals: vec![serde_json::json!({"app": "tome", "count": 14, "unique_installs": 4, "unique_sessions": 6})],
+        totals: vec![
+            serde_json::json!({"app": "tome", "count": 14, "unique_installs": 4, "unique_sessions": 6}),
+        ],
         top_events: vec![serde_json::json!({"event_name": "tome.search", "count": 11})],
         apps: vec![gauge_query::AppMeta {
-            app: "tome".into(), event_names: vec!["tome.search".into()],
-            attribute_keys: vec!["surface".into()], first_event: None, last_event: None, total_events: 14,
+            app: "tome".into(),
+            event_names: vec!["tome.search".into()],
+            attribute_keys: vec!["surface".into()],
+            first_event: None,
+            last_event: None,
+            total_events: 14,
         }],
     }
 }
