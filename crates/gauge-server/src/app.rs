@@ -12,8 +12,12 @@ pub fn build_router(state: AppState) -> Router {
     let ingest = Router::new()
         .route("/v1/logs", post(routes::ingest::ingest))
         .layer(DefaultBodyLimit::max(gauge_events::profile::MAX_BODY_BYTES));
+    let auth = Router::new()
+        .route("/v1/auth/challenge", post(routes::auth::challenge))
+        .route("/v1/auth/verify", post(routes::auth::verify));
     public
         .merge(ingest)
+        .merge(auth)
         .layer(tower_http::request_id::PropagateRequestIdLayer::x_request_id())
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::request_id::SetRequestIdLayer::x_request_id(
