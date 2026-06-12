@@ -41,7 +41,7 @@
 - [x] Task 7 — gauge-events: OTLP wire types (PR #3)
 - [x] Task 8 — gauge-events: Gauge profile validation (PR #3)
 - [x] Task 9 — gauge-events: SPEC.md + pin test (PR #3)
-- [ ] Task 10 — gauge-query: query DSL types
+- [x] Task 10 — gauge-query: query DSL types (PR #4)
 - [ ] Task 11 — gauge-server: scaffold
 - [ ] Task 12 — gauge-server: events migration + batch insert
 - [ ] Task 13 — gauge-server: OTLP ingest endpoint
