@@ -8,7 +8,11 @@ use crate::state::AppState;
 pub fn build_router(state: AppState) -> Router {
     let public = Router::new()
         .route("/healthz", get(routes::health::healthz))
-        .route("/readyz", get(routes::health::readyz));
+        .route("/readyz", get(routes::health::readyz))
+        // Demo data generator: always routed (so it returns a clean 404 rather
+        // than tripping the bearer layer's unmatched-route 401), but the handler
+        // itself 404s unless `demo_mode` (ENABLE_DEMO_MODE=1) is set. No auth.
+        .route("/v1/mock", post(routes::mock::mock));
     let ingest = Router::new()
         .route("/v1/logs", post(routes::ingest::ingest))
         .layer(DefaultBodyLimit::max(gauge_events::profile::MAX_BODY_BYTES))

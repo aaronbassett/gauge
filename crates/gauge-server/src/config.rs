@@ -11,6 +11,8 @@ pub struct Config {
     pub rate_logs_per_min: u32,
     pub rate_auth_per_min: u32,
     pub rate_user_per_min: u32,
+    /// `ENABLE_DEMO_MODE=1` exposes the unauthenticated `/v1/mock` data generator.
+    pub enable_demo_mode: bool,
 }
 
 impl Config {
@@ -42,6 +44,7 @@ impl Config {
             rate_logs_per_min: opt_u32("GAUGE_RATE_LOGS_PER_MIN", 60)?,
             rate_auth_per_min: opt_u32("GAUGE_RATE_AUTH_PER_MIN", 10)?,
             rate_user_per_min: opt_u32("GAUGE_RATE_USER_PER_MIN", 120)?,
+            enable_demo_mode: std::env::var("ENABLE_DEMO_MODE").is_ok_and(|v| v == "1"),
         })
     }
 }
