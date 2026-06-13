@@ -14,6 +14,9 @@ pub struct AppState {
     pub challenges: Arc<ChallengeStore>,
     pub secret: Arc<SigningSecret>,
     pub limiters: Arc<Limiters>,
+    /// When true, the unauthenticated `/v1/mock` demo endpoint is mounted.
+    /// Driven by `ENABLE_DEMO_MODE=1`; off by default.
+    pub demo_mode: bool,
 }
 
 impl AppState {
@@ -31,6 +34,7 @@ impl AppState {
                 cfg.rate_auth_per_min,
                 cfg.rate_user_per_min,
             )),
+            demo_mode: cfg.enable_demo_mode,
         })
     }
 }

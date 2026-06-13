@@ -17,6 +17,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&cfg.database_url)
         .await?;
     sqlx::migrate!("../../migrations").run(&pool).await?;
+    if cfg.enable_demo_mode {
+        tracing::warn!(
+            "DEMO MODE ENABLED (ENABLE_DEMO_MODE=1): POST /v1/mock generates synthetic events with no auth — do not enable in production"
+        );
+    }
     let state = AppState::from_config(cfg, pool)?;
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;

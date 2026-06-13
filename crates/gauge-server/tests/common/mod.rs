@@ -25,6 +25,7 @@ pub fn test_state(pool: PgPool) -> (AppState, Keypair) {
         challenges: Arc::new(ChallengeStore::new()),
         secret: Arc::new(SigningSecret::new(TEST_SECRET.to_vec()).unwrap()),
         limiters: Arc::new(Limiters::new(100_000, 100_000, 100_000)),
+        demo_mode: false,
     };
     (state, kp)
 }
