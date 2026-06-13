@@ -1,0 +1,26 @@
+# The Rust build dir — gigabytes of local artifacts, rebuilt inside the image.
+# This is the whole reason `fly deploy` was uploading hundreds of MB of context.
+target/
+
+# Version control & CI — not needed to build the server binary.
+.git/
+.gitignore
+.github/
+
+# Local tooling / editor state.
+.claude/
+
+# Secrets & private keys — must NEVER be copied into an image layer.
+.env
+*.private
+
+# Docs and config not used by `cargo build -p gauge-server`.
+docs/
+*.md
+deny.toml
+fly.toml
+Dockerfile.server
+.dockerignore
+
+# What the build DOES need is intentionally NOT ignored:
+#   Cargo.toml, Cargo.lock, rust-toolchain.toml, crates/**, migrations/**
