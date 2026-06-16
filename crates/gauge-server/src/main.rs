@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(5)
         .connect(&cfg.database_url)
         .await?;
-    sqlx::migrate!("../../migrations").run(&pool).await?;
+    sqlx::migrate!("./migrations").run(&pool).await?;
     if cfg.enable_demo_mode {
         tracing::warn!(
             "DEMO MODE ENABLED (ENABLE_DEMO_MODE=1): POST /v1/mock generates synthetic events with no auth — do not enable in production"

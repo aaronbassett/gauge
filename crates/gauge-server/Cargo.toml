@@ -4,11 +4,24 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Gauge server: anonymous OTLP ingest, an authenticated query API, and an MCP interface, backed by Postgres."
+keywords = ["telemetry", "otlp", "analytics", "observability"]
+categories = ["web-programming", "development-tools"]
+
+# Distribute gauge-server as GitHub-release archives + a shell installer, but
+# NOT via Homebrew. A per-package `installers` list REPLACES the workspace list
+# (it does not merge), so omitting "homebrew" here means cargo-dist generates a
+# Homebrew formula for the client (`gauge`) only — `gauge.rb`, no server formula.
+[package.metadata.dist]
+installers = ["shell"]
 
 [dependencies]
-gauge-auth = { path = "../gauge-auth" }
-gauge-events = { path = "../gauge-events" }
-gauge-query = { path = "../gauge-query" }
+gauge-auth.workspace = true
+gauge-events.workspace = true
+gauge-query.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tower.workspace = true

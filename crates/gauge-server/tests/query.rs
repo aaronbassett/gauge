@@ -50,7 +50,7 @@ fn token(state: &gauge_server::state::AppState) -> String {
     .0
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn query_requires_auth(pool: PgPool) {
     let (state, _kp) = common::test_state(pool);
     let app = build_router(state);
@@ -59,7 +59,7 @@ async fn query_requires_auth(pool: PgPool) {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn aggregates_counts_and_uniques(pool: PgPool) {
     seed(&pool).await;
     let (state, _kp) = common::test_state(pool);
@@ -84,7 +84,7 @@ async fn aggregates_counts_and_uniques(pool: PgPool) {
     assert_eq!(resp["truncated"], false);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn attr_filter_and_dimension_work(pool: PgPool) {
     seed(&pool).await;
     let (state, _kp) = common::test_state(pool);
@@ -102,7 +102,7 @@ async fn attr_filter_and_dimension_work(pool: PgPool) {
     assert_eq!(resp["rows"][0]["count"], 4);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn exists_filter_executes_end_to_end(pool: PgPool) {
     // Exercises the `exists` filter SQL path against real Postgres (the snapshot
     // test only checks SQL text). All 6 seeded events carry a `surface` attr.
@@ -122,7 +122,7 @@ async fn exists_filter_executes_end_to_end(pool: PgPool) {
     assert_eq!(resp["rows"][0]["count"], 6);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn invalid_query_is_422_naming_the_field(pool: PgPool) {
     let (state, _kp) = common::test_state(pool);
     let t = token(&state);

@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Ed25519 challenge/response authentication and JWT issuance for Gauge, the privacy-first developer telemetry platform."
+keywords = ["telemetry", "auth", "ed25519", "jwt"]
+categories = ["authentication"]
 
 [dependencies]
 serde.workspace = true

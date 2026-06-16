@@ -6,7 +6,7 @@ use sqlx::PgPool;
 
 const FIXTURE: &str = include_str!("../../gauge-events/tests/fixtures/valid_batch.json");
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn valid_batch_is_stored(pool: PgPool) {
     let (state, _kp) = common::test_state(pool.clone());
     let app = build_router(state);
@@ -26,7 +26,7 @@ async fn valid_batch_is_stored(pool: PgPool) {
     assert_eq!(name, "tome.search");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn unknown_app_is_rejected_whole(pool: PgPool) {
     let (state, _kp) = common::test_state(pool.clone());
     let app = build_router(state);
@@ -43,7 +43,7 @@ async fn unknown_app_is_rejected_whole(pool: PgPool) {
     assert_eq!(n, 0);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn bad_record_yields_partial_success(pool: PgPool) {
     let (state, _kp) = common::test_state(pool.clone());
     let app = build_router(state);
@@ -66,7 +66,7 @@ async fn bad_record_yields_partial_success(pool: PgPool) {
     assert_eq!(n, 1);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn malformed_json_is_400(pool: PgPool) {
     let (state, _kp) = common::test_state(pool);
     let app = build_router(state);

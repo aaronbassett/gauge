@@ -11,7 +11,7 @@ fn demo_state(pool: PgPool) -> AppState {
     state
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn mock_is_404_when_demo_disabled(pool: PgPool) {
     let (state, _kp) = common::test_state(pool); // demo_mode = false
     let app = build_router(state);
@@ -20,7 +20,7 @@ async fn mock_is_404_when_demo_disabled(pool: PgPool) {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn mock_defaults_to_50_within_30_days_no_auth(pool: PgPool) {
     let app = build_router(demo_state(pool.clone()));
     // empty `{}` body, no bearer → all defaults, no auth required.
@@ -45,7 +45,7 @@ async fn mock_defaults_to_50_within_30_days_no_auth(pool: PgPool) {
     assert_eq!(outside, 0);
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn mock_respects_count_and_explicit_range_and_profile(pool: PgPool) {
     let app = build_router(demo_state(pool.clone()));
     let body = serde_json::json!({
@@ -94,7 +94,7 @@ async fn mock_respects_count_and_explicit_range_and_profile(pool: PgPool) {
     assert!((1..=25).contains(&installs));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn mock_rejects_inverted_range(pool: PgPool) {
     let app = build_router(demo_state(pool));
     let body = serde_json::json!({"start": "2026-02-01T00:00:00Z", "end": "2026-01-01T00:00:00Z"});
@@ -103,7 +103,7 @@ async fn mock_rejects_inverted_range(pool: PgPool) {
     assert_eq!(resp["code"], "invalid_request");
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn mock_rejects_count_over_cap(pool: PgPool) {
     let app = build_router(demo_state(pool));
     let body = serde_json::json!({"count": 100_001});

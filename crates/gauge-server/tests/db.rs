@@ -25,7 +25,7 @@ pub fn test_event(app: &str, name: &str, time: OffsetDateTime) -> ParsedEvent {
     }
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn insert_events_persists_rows(pool: PgPool) {
     let res = test_resource("tome");
     let now = OffsetDateTime::now_utc();
@@ -51,7 +51,7 @@ async fn insert_events_persists_rows(pool: PgPool) {
     assert_eq!(attrs["surface"], serde_json::json!("cli"));
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn insert_empty_slice_is_noop(pool: PgPool) {
     db::insert_events(&pool, &test_resource("tome"), &[])
         .await
