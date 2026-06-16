@@ -22,5 +22,17 @@ fly.toml
 Dockerfile.server
 .dockerignore
 
+# Release & packaging tooling — used by release-plz / cargo-dist / cargo-about,
+# never by `cargo build -p gauge-server`.
+dist-workspace.toml
+release-plz.toml
+about.toml
+about.hbs
+
+# License files — shipped with releases, not consumed by the server build.
+LICENSE-MIT
+LICENSE-APACHE
+
 # What the build DOES need is intentionally NOT ignored:
-#   Cargo.toml, Cargo.lock, rust-toolchain.toml, crates/**, migrations/**
+#   Cargo.toml, Cargo.lock, rust-toolchain.toml, crates/**
+#   (server migrations live at crates/gauge-server/migrations/, covered by crates/**)
