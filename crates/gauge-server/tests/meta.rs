@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn meta_reports_apps_events_and_keys(pool: PgPool) {
     let res = ResourceInfo {
         app: "tome".into(),
@@ -53,7 +53,7 @@ async fn meta_reports_apps_events_and_keys(pool: PgPool) {
     assert!(apps[0]["first_event"].is_string());
 }
 
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn meta_requires_auth(pool: PgPool) {
     let (state, _kp) = common::test_state(pool);
     let app = build_router(state);

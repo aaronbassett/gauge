@@ -4,6 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "OTLP event types and a lightweight sender for Gauge, the privacy-first developer telemetry platform."
+keywords = ["telemetry", "otlp", "analytics", "observability"]
+categories = ["development-tools"]
+readme = "SPEC.md"
 
 [features]
 sender = ["dep:reqwest"]

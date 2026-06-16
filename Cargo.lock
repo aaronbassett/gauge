@@ -803,7 +803,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "gauge"
+name = "gauge-auth"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ed25519-dalek",
+ "jsonwebtoken",
+ "rand_core 0.6.4",
+ "serde",
+ "thiserror",
+ "time",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "gauge-client"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -824,21 +839,6 @@ dependencies = [
  "tokio",
  "toml",
  "wiremock",
-]
-
-[[package]]
-name = "gauge-auth"
-version = "0.1.0"
-dependencies = [
- "base64",
- "ed25519-dalek",
- "jsonwebtoken",
- "rand_core 0.6.4",
- "serde",
- "thiserror",
- "time",
- "toml",
- "uuid",
 ]
 
 [[package]]

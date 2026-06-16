@@ -13,8 +13,19 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.93"
+repository = "https://github.com/aaronbassett/gauge"
+homepage = "https://github.com/aaronbassett/gauge"
+authors = ["Aaron Bassett <aaronbassett@gmail.com>"]
 
 [workspace.dependencies]
+# Internal crates. Versions are REQUIRED for crates.io publishing (a path-only
+# dependency is rejected by the registry; cargo strips `path` at publish time
+# and keeps `version`). release-plz keeps these versions in lockstep with the
+# shared workspace package version.
+gauge-auth = { path = "crates/gauge-auth", version = "0.1.0" }
+gauge-events = { path = "crates/gauge-events", version = "0.1.0" }
+gauge-query = { path = "crates/gauge-query", version = "0.1.0" }
+
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -42,3 +53,10 @@ rmcp = { version = "1", features = ["server", "transport-io"] }
 insta = { version = "1", features = ["json"] }
 wiremock = "0.6"
 tempfile = "3"
+
+# Build profile used by cargo-dist for release artifacts. Workspace profiles
+# must be declared at the root. Inherits the release profile; thin LTO keeps
+# build times reasonable while still trimming the binaries.
+[profile.dist]
+inherits = "release"
+lto = "thin"

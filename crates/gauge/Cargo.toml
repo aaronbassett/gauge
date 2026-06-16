@@ -1,13 +1,35 @@
 [package]
-name = "gauge"
+name = "gauge-client"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Gauge client: authenticated query access, a terminal dashboard (TUI), and an MCP server for privacy-first developer telemetry."
+keywords = ["telemetry", "analytics", "cli", "tui", "mcp"]
+categories = ["command-line-utilities", "development-tools"]
+
+# Published to crates.io as `gauge-client` because the crate name `gauge` is
+# already taken by an unrelated crate. The BINARY and library stay named `gauge`
+# (so `cargo install gauge-client` installs a `gauge` binary, internal
+# `use gauge::...` imports keep working, and the Homebrew formula is `gauge.rb`).
+[lib]
+name = "gauge"
+
+[[bin]]
+name = "gauge"
+path = "src/main.rs"
+
+[package.metadata.dist]
+# dist's app name is the package (`gauge-client`); pin the formula name to
+# `gauge` so the generated formula is `gauge.rb`, not `gauge-client.rb`.
+formula = "gauge"
 
 [dependencies]
-gauge-auth = { path = "../gauge-auth" }
-gauge-query = { path = "../gauge-query" }
+gauge-auth.workspace = true
+gauge-query.workspace = true
 clap.workspace = true
 tokio.workspace = true
 reqwest.workspace = true

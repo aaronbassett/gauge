@@ -1,0 +1,86 @@
+# release-plz configuration — automatic release FRONT-END for the Gauge workspace.
+#
+# On every push to `main`, release-plz maintains a single "Release vX.Y.Z" PR
+# (shared version bump across all crates + one workspace CHANGELOG, regenerated
+# from the Conventional Commits). Merging that PR is the single approval gate.
+# On merge, release-plz:
+#   1. publishes every workspace crate to crates.io, in dependency order, and
+#   2. pushes ONE `vX.Y.Z` git tag.
+# That tag fires the tag-triggered `.github/workflows/release.yml` BACK-END,
+# which builds the prebuilt binaries, creates the GitHub Release, and pushes the
+# Homebrew formula. release-plz does NOT create the GitHub Release
+# (`git_release_enable = false`); release.yml owns that.
+#
+# WHY release-plz PUBLISHES (and we do NOT defer `cargo publish` to release.yml):
+# release-plz uses crates.io as its source of truth for "what's already
+# released". If publishing were deferred to a separate (and initially dormant)
+# job, crates.io would lag, release-plz would perpetually believe the version is
+# unreleased, and it would re-open a duplicate "Release" PR after every merge —
+# an endless loop. Letting release-plz publish keeps crates.io authoritative and
+# current, so the loop cannot happen. `publish` is left at its default (`true`).
+
+[workspace]
+# Single-tag idiom for a workspace (see the per-package override on `gauge`):
+# disable per-crate tags/releases by DEFAULT so we don't get five tags...
+git_tag_enable = false
+# ...and never let release-plz create the GitHub Release — release.yml does that
+# (with the binary artifacts attached). Avoids a duplicate, asset-less release.
+git_release_enable = false
+
+# One workspace changelog (git-cliff). Conventional-Commit types map to readable,
+# grouped sections; pure-noise types (ci/build/test/style/chore + merge commits)
+# are skipped so the changelog reads as a user-facing release note. The trailing
+# catch-all routes any non-conventional commit into "Other".
+[changelog]
+protect_breaking_commits = true
+commit_parsers = [
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^revert", group = "Reverted" },
+    { message = "^chore\\(deps\\)", group = "Dependencies" },
+    { message = "^(chore|ci|build|test|style)", skip = true },
+    { message = "^Merge", skip = true },
+    { message = ".*", group = "Other" },
+]
+
+# ---------------------------------------------------------------------------
+# `gauge` (the client) is the PRIMARY package: it owns the single workspace tag
+# and the single workspace changelog. All five crates share one version via the
+# `version_group`, so one tag describes the whole release.
+# ---------------------------------------------------------------------------
+[[package]]
+name = "gauge-client"
+version_group = "gauge"
+# The ONLY crate that gets a tag, named `vX.Y.Z` so it matches release.yml's
+# `v[0-9]+.[0-9]+.[0-9]+*` trigger (the default workspace pattern would be the
+# crate-prefixed `gauge-v{{ version }}`, which would NOT match).
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = false
+# One workspace-level changelog at the repo root, aggregating every crate's
+# commits (the four other crates set `changelog_update = false` below).
+changelog_path = "CHANGELOG.md"
+changelog_include = ["gauge-auth", "gauge-events", "gauge-query", "gauge-server"]
+
+[[package]]
+name = "gauge-server"
+version_group = "gauge"
+changelog_update = false
+
+[[package]]
+name = "gauge-auth"
+version_group = "gauge"
+changelog_update = false
+
+[[package]]
+name = "gauge-events"
+version_group = "gauge"
+changelog_update = false
+
+[[package]]
+name = "gauge-query"
+version_group = "gauge"
+changelog_update = false

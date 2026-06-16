@@ -1,0 +1,34 @@
+# cargo-about configuration for the THIRD-PARTY-LICENSES bundle attached to each
+# GitHub Release. `cargo about generate about.hbs` enumerates the licences of
+# every crate in the dependency graph and renders them into a plain-text notice
+# file. Gauge is pure Rust (no statically-linked native components), so the
+# bundle is just the cargo dependency graph.
+#
+# The `accepted` list mirrors deny.toml's licence allowlist so the two stay
+# consistent and cargo-deny remains green.
+
+# Build the licence list across every target platform we ship, so a
+# platform-specific transitive dependency still has its notice carried.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
+# Dev-dependencies never ship in the binaries, so exclude them from the bundle.
+ignore-dev-dependencies = true
+
+# SPDX licences accepted in the bundle — identical set to deny.toml's `allow`.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+]

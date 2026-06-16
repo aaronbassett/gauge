@@ -1,0 +1,284 @@
+name: Release
+
+# Tag-triggered BACK-END. DORMANT on pull requests and on pushes to main (those
+# are covered by ci.yml). It runs only when a `vMAJOR.MINOR.PATCH` tag is pushed
+# — which release-plz does after the "Release" PR is merged (release-plz also
+# does the crates.io publish; this workflow does NOT publish to crates.io).
+#
+# Responsibilities: build the prebuilt client (`gauge`) + server (`gauge-server`)
+# binaries for all targets, create the GitHub Release with those artifacts + a
+# THIRD-PARTY-LICENSES bundle, and push the client's Homebrew formula to the tap.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+# The default GITHUB_TOKEN only needs to create the GitHub Release in this repo.
+# The cross-owner Homebrew-tap push uses an operator-provided least-privilege PAT.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # The exact dist version the pipeline is pinned to. Must match
+  # `cargo-dist-version` in dist-workspace.toml (reproducibility).
+  DIST_VERSION: "0.32.0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gate — same quality bar as ci.yml. A failure here stops the release before
+  # any artifact is built. (The tag is only created after the Release PR merged,
+  # so this is a fast safety net rather than the primary gate.)
+  # ---------------------------------------------------------------------------
+  gate:
+    name: Gate (fmt / clippy / cargo-deny)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-gate
+          cache-bin: false
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny
+
+      - name: cargo deny check
+        run: cargo deny check
+
+  # ---------------------------------------------------------------------------
+  # Detect the Homebrew-tap PAT WITHOUT exposing its value (it cannot be read in
+  # a job-level `if`), so the tap-push job stays dormant until the secret is set.
+  # ---------------------------------------------------------------------------
+  secret-preflight:
+    name: Detect operator secrets (dormant-job gating)
+    runs-on: ubuntu-latest
+    outputs:
+      has_tap_token: ${{ steps.detect.outputs.has_tap_token }}
+    steps:
+      - id: detect
+        env:
+          HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+        run: |
+          echo "has_tap_token=${HAS_TAP_TOKEN}" >> "$GITHUB_OUTPUT"
+          echo "Homebrew tap push enabled: ${HAS_TAP_TOKEN}"
+
+  # ---------------------------------------------------------------------------
+  # Per-target build of the local artifacts (the per-app archives + checksums for
+  # both `gauge` and `gauge-server`). Each target builds on its own runner.
+  # Builds use the committed Cargo.lock (cargo-build-args = ["--locked"]).
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.target }}
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-build-${{ matrix.target }}
+          cache-bin: false
+
+      - name: Install dist (pinned)
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/v${DIST_VERSION}/cargo-dist-installer.sh" | sh
+
+      - name: Build local artifacts (per-target archives for both apps)
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          dist build --artifacts=local --target="${TARGET}" \
+            --tag="${GITHUB_REF_NAME}" --output-format=json > dist-manifest.json
+          cat dist-manifest.json
+
+      - name: Upload local artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-local-${{ matrix.target }}
+          path: |
+            target/distrib/*.tar.xz
+            target/distrib/*.tar.xz.sha256
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Global artifacts (one-per-app): the shell installer(s), the client Homebrew
+  # formula (`gauge.rb` only — gauge-server opts out), the unified checksum, plus
+  # the regenerated THIRD-PARTY-LICENSES bundle.
+  # ---------------------------------------------------------------------------
+  global:
+    name: Global artifacts + licence bundle
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-global
+          cache-bin: false
+
+      - name: Install dist (pinned)
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/v${DIST_VERSION}/cargo-dist-installer.sh" | sh
+
+      - name: Build global artifacts (installer + formula + checksum)
+        shell: bash
+        run: |
+          dist build --artifacts=global \
+            --tag="${GITHUB_REF_NAME}" --output-format=json > global-manifest.json
+          cat global-manifest.json
+
+      - name: Install cargo-about (pinned via --locked)
+        run: cargo install --locked --features cli cargo-about
+
+      - name: Regenerate THIRD-PARTY-LICENSES
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo about generate about.hbs > THIRD-PARTY-LICENSES
+          echo "Regenerated THIRD-PARTY-LICENSES ($(wc -l < THIRD-PARTY-LICENSES) lines)"
+
+      - name: Upload global artifacts + licence bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-global
+          path: |
+            target/distrib/*.sh
+            target/distrib/*.rb
+            target/distrib/sha256.sum
+            THIRD-PARTY-LICENSES
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Create the GitHub Release and attach every per-platform archive, its
+  # checksum, the installer(s), the client formula, and the licence bundle.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Create GitHub Release
+    needs: [build, global]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: artifacts-*
+          path: dist-artifacts
+          merge-multiple: true
+
+      - name: Create release with artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          # download-artifact (merge-multiple) preserves each artifact's own
+          # directory structure, so the local archives land under
+          # dist-artifacts/target/distrib/. Enumerate FILES only, recursively,
+          # so a directory is never passed to `gh release` (it rejects those).
+          mapfile -t assets < <(find dist-artifacts -type f)
+          # Idempotent: if a prior run already created the release (e.g. a re-run
+          # after a downstream failure), refresh its assets instead of failing.
+          # --clobber overwrites same-named assets so a re-run converges.
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} exists; uploading/refreshing assets."
+            gh release upload "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber \
+              "${assets[@]}"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              "${assets[@]}"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # DORMANT — push the CLIENT Homebrew formula (`gauge.rb`) to the cross-owner
+  # tap `aaronbassett/homebrew-tap`. Runs only once the operator sets a
+  # least-privilege PAT (HOMEBREW_TAP_TOKEN) scoped to write only the tap repo.
+  # The PAT is passed to the checkout action's `token` input ONLY; never logged.
+  # ---------------------------------------------------------------------------
+  publish-homebrew-tap:
+    name: Push formula to Homebrew tap (dormant until PAT set)
+    needs: [global, release, secret-preflight]
+    if: needs.secret-preflight.outputs.has_tap_token == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download global artifacts (the generated formula)
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-global
+          path: global-artifacts
+
+      - name: Checkout the tap repo (cross-owner, PAT-authenticated)
+        uses: actions/checkout@v5
+        with:
+          repository: aaronbassett/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+          persist-credentials: true
+
+      - name: Stage + commit the formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          # download-artifact preserves the artifact's own layout, so the
+          # formula lands under target/distrib/. Locate it by name.
+          formula="$(find global-artifacts -type f -name gauge.rb | head -1)"
+          if [ -z "$formula" ]; then
+            echo "::error::gauge.rb not found in the global artifacts; cannot update the Homebrew tap."
+            exit 1
+          fi
+          mkdir -p homebrew-tap/Formula
+          cp "$formula" homebrew-tap/Formula/gauge.rb
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/gauge.rb; then
+            echo "Formula unchanged; nothing to push."
+            exit 0
+          fi
+          git add Formula/gauge.rb
+          git commit -m "gauge ${GITHUB_REF_NAME}"
+          # Push uses the credentials persisted by actions/checkout (the PAT);
+          # the token is never referenced on this command line.
+          git push origin HEAD

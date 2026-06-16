@@ -9,7 +9,7 @@ use tracing_subscriber::fmt::MakeWriter;
 
 /// Canary 1: the events schema must contain exactly the spec's columns —
 /// catching any accidental addition of IP/UA/identity columns in review.
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn events_schema_has_exactly_the_spec_columns(pool: PgPool) {
     let cols: Vec<String> = sqlx::query_scalar(
         "SELECT column_name FROM information_schema.columns WHERE table_name = 'events' ORDER BY column_name",
@@ -59,7 +59,7 @@ impl<'a> MakeWriter<'a> for Capture {
 /// Canary 2: nothing logged on the ingest path may contain attribute values.
 /// (sqlx::test uses a current-thread runtime, so the thread-local default
 /// subscriber covers the handler.)
-#[sqlx::test(migrations = "../../migrations")]
+#[sqlx::test(migrations = "./migrations")]
 async fn ingest_path_never_logs_attribute_values(pool: PgPool) {
     const CANARY: &str = "SECRET_CANARY_VALUE_DO_NOT_LOG";
     let capture = Capture::default();
