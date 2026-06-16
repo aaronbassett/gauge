@@ -125,7 +125,7 @@ jobs:
           cat dist-manifest.json
 
       - name: Upload local artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-local-${{ matrix.target }}
           path: |
@@ -177,7 +177,7 @@ jobs:
           echo "Regenerated THIRD-PARTY-LICENSES ($(wc -l < THIRD-PARTY-LICENSES) lines)"
 
       - name: Upload global artifacts + licence bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-global
           path: |
@@ -199,7 +199,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: artifacts-*
           path: dist-artifacts
@@ -244,7 +244,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download global artifacts (the generated formula)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: artifacts-global
           path: global-artifacts
@@ -273,11 +273,15 @@ jobs:
           cd homebrew-tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- Formula/gauge.rb; then
+          git add Formula/gauge.rb
+          # Stage BEFORE diffing: `git diff --quiet` ignores untracked files, so a
+          # brand-new formula (the first release) reads as "no change" and would
+          # never get pushed. `git diff --cached` compares the STAGED file against
+          # HEAD, correctly detecting a new OR modified formula.
+          if git diff --cached --quiet -- Formula/gauge.rb; then
             echo "Formula unchanged; nothing to push."
             exit 0
           fi
-          git add Formula/gauge.rb
           git commit -m "gauge ${GITHUB_REF_NAME}"
           # Push uses the credentials persisted by actions/checkout (the PAT);
           # the token is never referenced on this command line.
