@@ -249,8 +249,10 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
     let picker = Paragraph::new(format!(
-        "measure (↑): {}    dimension (↓): {}    enter: run",
-        EXPLORE_MEASURES[app.explore.measure_idx], EXPLORE_DIMENSIONS[app.explore.dimension_idx],
+        "measure (↑): {}    dimension (↓): {}    attr (n): {}    enter: run",
+        EXPLORE_MEASURES[app.explore.measure_idx],
+        EXPLORE_DIMENSIONS[app.explore.dimension_idx],
+        app.explore.numeric_attr.as_deref().unwrap_or("(none)"),
     ))
     .block(Block::default().borders(Borders::ALL).title("Explore"));
     f.render_widget(picker, chunks[0]);
