@@ -236,9 +236,9 @@ A query request compiles to **one parameterized SQL statement** (identifiers com
 from closed enums; values are always bound), run in a read-only transaction with a 5s
 statement timeout.
 
-- **Measures:** `count`, `unique_installs` (`COUNT(DISTINCT install_id)`), `unique_sessions`
-- **Dimensions:** `app`, `event_name`, `app_version`, `os`, `arch`, `attr.<key>`, plus a time bucket when `granularity` is set
-- **Filters:** `eq` · `neq` · `in` · `exists` over those fields
+- **Measures:** `count`, `unique_installs` (`COUNT(DISTINCT install_id)`), `unique_sessions`; numeric aggregates over a numeric `attr.<key>` as single-key objects — `{"avg":"attr.latency_ms"}`, `min`, `max`, `p50`, `p90`, `p95`, `p99`
+- **Dimensions:** `app`, `event_name`, `app_version`, `os`, `arch`, `attr.<key>`, a time bucket when `granularity` is set, plus a numeric **bucket** of a numeric `attr.<key>`: `{"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}}` (rows carry the range label; edges + labels are echoed in `meta.buckets`)
+- **Filters:** `eq` · `neq` · `in` · `exists` over any field; numeric `gt` · `gte` · `lt` · `lte` over a numeric `attr.<key>` (e.g. `{"field":"attr.latency_ms","op":"gt","value":500}`). Non-numeric / null attribute values are excluded, never errored.
 - **Time range:** relative (`{"last":"7d"}`) or absolute (`{"from":…,"to":…}` RFC3339)
 - **Granularity:** `hour` · `day` · `week`
 - **Order / limit:** order by any selected field; limit defaults to 1,000, hard cap 10,000; the response flags `truncated`
@@ -261,6 +261,29 @@ statement timeout.
   ],
   "truncated": false,
   "elapsed_ms": 12
+}
+```
+
+A latency histogram with percentiles:
+
+```jsonc
+// POST /v1/query
+{
+  "measures": ["count", {"p95":"attr.latency_ms"}],
+  "dimensions": [{"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}}],
+  "filters": [{"field":"app","op":"eq","value":"tome"}],
+  "time_range": {"last":"7d"}
+}
+// →
+{
+  "rows": [
+    {"attr.latency_ms":"<50","count":820,"p95_latency_ms":41.0},
+    {"attr.latency_ms":"50-200","count":540,"p95_latency_ms":180.0}
+  ],
+  "truncated": false, "elapsed_ms": 14,
+  "meta": {"buckets":[{"field":"attr.latency_ms","alias":"attr.latency_ms",
+                       "edges":[50,200,500,1000],
+                       "labels":["<50","50-200","200-500","500-1000","1000+"]}]}
 }
 ```
 
