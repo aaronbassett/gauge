@@ -1,7 +1,7 @@
 # Gauge MCP Tools Upgrade — Design
 
 - **Date:** 2026-06-17
-- **Status:** Approved (brainstorming)
+- **Status:** Implemented (2026-06-17)
 - **Scope:** `crates/gauge` (`src/mcp/`), with type touch-points in `gauge-query` and `gauge`'s `ClientError`.
 - **Branch:** `mcp-tools-upgrade`
 
