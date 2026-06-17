@@ -5,6 +5,7 @@
 //! `is_error: true` result carrying a shared error envelope.
 
 use crate::error::ClientError;
+use crate::mcp::tools::{EventsOverTimeParams, TopBy, TopEventsParams, UniqueUsersParams};
 use gauge_query::{QueryRequest, TimeRange};
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value, json};
@@ -330,6 +331,118 @@ pub fn project_query(resp: &Value, req: &QueryRequest) -> ToolOutcome {
     }
 }
 
+/// `unique_users` -> single-row `{ unique_installs: N }`.
+pub fn project_unique_users(resp: &Value, p: &UniqueUsersParams) -> ToolOutcome {
+    let count = rows_of(resp)
+        .first()
+        .and_then(|r| r.get("unique_installs"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    let scope = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => format!("{a} · {e}"),
+        (Some(a), None) => a.clone(),
+        (None, Some(e)) => e.clone(),
+        (None, None) => "all apps".to_owned(),
+    };
+    let summary = format!("{count} unique installs ({scope}, {}).", p.period);
+    let next_actions = vec![NextAction::call(
+        "See what those users are doing — top events for the same app and period",
+        "top_events",
+        match &p.app {
+            Some(a) => json!({ "period": p.period, "app": a }),
+            None => json!({ "period": p.period }),
+        },
+    )];
+    let trimmed = json!({ "unique_installs": count, "scope": scope, "period": p.period });
+    ToolOutcome {
+        summary,
+        trimmed,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
+/// `top_events` -> rows `{ event_name, <measure> }` ranked desc.
+pub fn project_top_events(resp: &Value, p: &TopEventsParams) -> ToolOutcome {
+    let measure_key = match p.by.unwrap_or(TopBy::Count) {
+        TopBy::Count => "count",
+        TopBy::UniqueInstalls => "unique_installs",
+    };
+    let rows = rows_of(resp);
+    let head: Vec<String> = rows
+        .iter()
+        .take(3)
+        .map(|r| {
+            let name = r.get("event_name").and_then(Value::as_str).unwrap_or("?");
+            let v = r.get(measure_key).and_then(Value::as_i64).unwrap_or(0);
+            format!("{name} {v}")
+        })
+        .collect();
+    let summary = format!(
+        "Top {} ({}): {}.",
+        rows.len().min(3),
+        p.period,
+        head.join(" · ")
+    );
+    let mut next_actions = Vec::new();
+    if let Some(top) = rows
+        .first()
+        .and_then(|r| r.get("event_name"))
+        .and_then(Value::as_str)
+    {
+        next_actions.push(NextAction::call(
+            format!("Count unique users of {top} over the same period"),
+            "unique_users",
+            json!({ "period": p.period, "event_name": top }),
+        ));
+        next_actions.push(NextAction::call(
+            format!("Plot {top} volume over time"),
+            "events_over_time",
+            json!({ "period": p.period, "granularity": "day", "event_name": top }),
+        ));
+    }
+    let trimmed = json!({ "top": rows.iter().take(p.limit.unwrap_or(10) as usize).cloned().collect::<Vec<_>>() });
+    ToolOutcome {
+        summary,
+        trimmed,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
+/// `events_over_time` -> rows `{ time_bucket, count }`.
+pub fn project_events_over_time(resp: &Value, p: &EventsOverTimeParams) -> ToolOutcome {
+    let rows = rows_of(resp);
+    let peak = rows
+        .iter()
+        .max_by_key(|r| r.get("count").and_then(Value::as_i64).unwrap_or(0));
+    let summary = match peak {
+        Some(r) => format!(
+            "{} buckets ({}), peak {} on {}.",
+            rows.len(),
+            p.period,
+            r.get("count").and_then(Value::as_i64).unwrap_or(0),
+            r.get("time_bucket").and_then(Value::as_str).unwrap_or("?"),
+        ),
+        None => format!("0 buckets ({}).", p.period),
+    };
+    let next_actions = vec![NextAction::call(
+        "Break the same window down by event type",
+        "top_events",
+        match &p.app {
+            Some(app) => json!({ "period": p.period, "app": app }),
+            None => json!({ "period": p.period }),
+        },
+    )];
+    let trimmed = json!({ "buckets": rows.len(), "rows": rows.iter().take(FENCE_ROW_CAP).cloned().collect::<Vec<_>>() });
+    ToolOutcome {
+        summary,
+        trimmed,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,7 +507,70 @@ mod tests {
         }
     }
 
+    use crate::mcp::tools::{EventsOverTimeParams, TopEventsParams, UniqueUsersParams};
     use gauge_query::{QueryRequest, TimeRange};
+
+    #[test]
+    fn project_top_events_ranks_and_drills_top() {
+        let resp = json!({
+            "rows": [
+                { "event_name": "tome.search", "count": 1204 },
+                { "event_name": "tome.open", "count": 980 }
+            ],
+            "truncated": false, "elapsed_ms": 8
+        });
+        let p = TopEventsParams {
+            period: "30d".into(),
+            app: Some("tome".into()),
+            by: None,
+            limit: None,
+        };
+        let o = project_top_events(&resp, &p);
+        assert!(o.summary.contains("tome.search"));
+        let drill = o
+            .next_actions
+            .iter()
+            .find(|a| a.tool == Some("unique_users"))
+            .unwrap();
+        assert_eq!(
+            drill.arguments.as_ref().unwrap()["event_name"],
+            json!("tome.search")
+        );
+    }
+
+    #[test]
+    fn project_unique_users_reads_scalar() {
+        let resp =
+            json!({ "rows": [ { "unique_installs": 412 } ], "truncated": false, "elapsed_ms": 6 });
+        let p = UniqueUsersParams {
+            period: "7d".into(),
+            app: Some("tome".into()),
+            event_name: None,
+        };
+        let o = project_unique_users(&resp, &p);
+        assert!(o.summary.contains("412"));
+        assert!(o.next_actions.iter().any(|a| a.tool == Some("top_events")));
+    }
+
+    #[test]
+    fn project_events_over_time_reports_peak() {
+        let resp = json!({
+            "rows": [
+                { "time_bucket": "2026-06-13", "count": 100 },
+                { "time_bucket": "2026-06-14", "count": 312 }
+            ],
+            "truncated": false, "elapsed_ms": 7
+        });
+        let p = EventsOverTimeParams {
+            period: "7d".into(),
+            granularity: gauge_query::Granularity::Day,
+            app: None,
+            event_name: None,
+        };
+        let o = project_events_over_time(&resp, &p);
+        assert!(o.summary.contains("312"));
+        assert!(o.summary.contains("2026-06-14"));
+    }
 
     #[test]
     fn project_meta_summarizes_and_suggests_drill() {
