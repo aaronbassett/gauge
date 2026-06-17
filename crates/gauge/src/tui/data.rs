@@ -197,10 +197,15 @@ pub async fn fetch_histogram(
     let probe = api.query(&histogram_probe_request(w, key)).await?;
     let row = probe.rows.first().cloned().unwrap_or_default();
     let g = |k: &str| row.get(k).and_then(serde_json::Value::as_f64);
+    // The probe response uses the output aliases produced by Measure::alias() in
+    // gauge-query: Min(attr.<key>) → "min_<key>", Max(attr.<key>) → "max_<key>".
+    // That is why format!("min_{key}") / format!("max_{key}") are the correct keys here.
     let (min, max) = (
         g(&format!("min_{key}")).unwrap_or(0.0),
         g(&format!("max_{key}")).unwrap_or(0.0),
     );
+    // A degenerate range (all values equal, so min == max) causes derive_edges to return
+    // a single split edge, yielding a valid two-bucket histogram rather than panicking.
     let edges = derive_edges(min, max);
     api.query(&histogram_bucket_request(w, key, edges)).await
 }

@@ -273,6 +273,16 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(picker, chunks[0]);
 
     if let Some(hist) = &app.explore.histogram {
+        let hist_block = Block::default()
+            .borders(Borders::ALL)
+            .title("Histogram (h to refresh)");
+        if hist.rows.is_empty() {
+            f.render_widget(
+                Paragraph::new("no data for this attribute").block(hist_block),
+                chunks[1],
+            );
+            return;
+        }
         let attr_alias = app
             .explore
             .numeric_attr
@@ -295,11 +305,7 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
             })
             .collect();
         let chart = BarChart::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title("Histogram (h to refresh)"),
-            )
+            .block(hist_block)
             .direction(Direction::Horizontal)
             .bar_width(1)
             .data(BarGroup::default().bars(&bars));

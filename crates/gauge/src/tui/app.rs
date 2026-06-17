@@ -80,6 +80,9 @@ impl App {
             KeyCode::Char('t') => {
                 self.window = self.window.next();
                 self.refresh_requested = true;
+                // The histogram was built for the old window; clear it so the Explore
+                // panel shows the normal result view until the user presses 'h' again.
+                self.explore.histogram = None;
             }
             KeyCode::Char('r') => self.refresh_requested = true,
             KeyCode::Left if self.page == Page::Apps => {
@@ -135,6 +138,9 @@ impl App {
                     }
                     (None, None) => None,
                 };
+                // The histogram was built for the old attr; clear it so the Explore panel
+                // shows the normal result view until the user presses 'h' again.
+                self.explore.histogram = None;
             }
             _ => {}
         }
@@ -258,5 +264,54 @@ mod tests {
         // should not panic; a second press is also a no-op
         app.on_key(KeyCode::Char('n'));
         assert_eq!(app.explore.numeric_attr, None);
+    }
+
+    fn empty_query_response() -> gauge_query::QueryResponse {
+        gauge_query::QueryResponse {
+            rows: vec![],
+            truncated: false,
+            elapsed_ms: 0,
+            meta: None,
+        }
+    }
+
+    #[test]
+    fn n_key_clears_stale_histogram() {
+        use crossterm::event::KeyCode;
+        let mut app = App::new();
+        app.page = Page::Explore;
+        app.snapshot = Some(snapshot_with_numeric_keys(vec!["a".into(), "b".into()]));
+        app.explore.numeric_attr = Some("a".into());
+
+        // Simulate a histogram that was fetched for attr "a".
+        app.explore.histogram = Some(empty_query_response());
+        assert!(app.explore.histogram.is_some());
+
+        // Pressing 'n' should cycle the attr AND clear the now-stale histogram.
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("b"));
+        assert!(
+            app.explore.histogram.is_none(),
+            "pressing 'n' must clear the stale histogram"
+        );
+    }
+
+    #[test]
+    fn t_key_clears_stale_histogram() {
+        use crossterm::event::KeyCode;
+        let mut app = App::new();
+        app.page = Page::Explore;
+        app.explore.numeric_attr = Some("latency_ms".into());
+
+        // Simulate a histogram fetched for the current window.
+        app.explore.histogram = Some(empty_query_response());
+        assert!(app.explore.histogram.is_some());
+
+        // Pressing 't' changes the window and must clear the now-stale histogram.
+        app.on_key(KeyCode::Char('t'));
+        assert!(
+            app.explore.histogram.is_none(),
+            "pressing 't' must clear the stale histogram"
+        );
     }
 }
