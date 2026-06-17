@@ -6,7 +6,8 @@
 
 use crate::error::ClientError;
 use crate::mcp::tools::{
-    EventsOverTimeParams, NumericStatsParams, TopBy, TopEventsParams, UniqueUsersParams,
+    EventsOverTimeParams, NumericHistogramParams, NumericStatsParams, TopBy, TopEventsParams,
+    UniqueUsersParams,
 };
 use gauge_query::{Field, FilterOp, FilterValue, QueryRequest, TimeRange};
 use rmcp::model::{CallToolResult, Content};
@@ -472,6 +473,56 @@ pub fn project_numeric_stats(resp: &Value, p: &NumericStatsParams) -> ToolOutcom
     ToolOutcome {
         summary,
         trimmed: row,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
+/// `numeric_histogram` -> rows `{ bucket: "<label>", count, unique_installs }`.
+pub fn project_numeric_histogram(resp: &Value, p: &NumericHistogramParams) -> ToolOutcome {
+    let rows = rows_of(resp);
+    let key = &p.field;
+    let scope = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => format!("{a} · {e}"),
+        (Some(a), None) => a.clone(),
+        (None, Some(e)) => e.clone(),
+        (None, None) => "all apps".to_owned(),
+    };
+    // Find the peak bucket by count.
+    let peak = rows
+        .iter()
+        .max_by_key(|r| r.get("count").and_then(Value::as_i64).unwrap_or(0));
+    let summary = match peak {
+        Some(r) => format!(
+            "{key} distribution ({scope}, {}): {} buckets, peak {} in {}.",
+            p.period,
+            rows.len(),
+            r.get("count").and_then(Value::as_i64).unwrap_or(0),
+            r.get("bucket").and_then(Value::as_str).unwrap_or("?"),
+        ),
+        None => format!("{key} distribution ({scope}, {}): 0 buckets.", p.period),
+    };
+    // Cross-link back to numeric_stats for the same field/scope.
+    let stats_args = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => {
+            json!({ "period": p.period, "field": key, "app": a, "event_name": e })
+        }
+        (Some(a), None) => json!({ "period": p.period, "field": key, "app": a }),
+        (None, Some(e)) => json!({ "period": p.period, "field": key, "event_name": e }),
+        (None, None) => json!({ "period": p.period, "field": key }),
+    };
+    let next_actions = vec![NextAction::call(
+        format!("See avg/min/max and percentiles for {key} over the same period"),
+        "numeric_stats",
+        stats_args,
+    )];
+    let trimmed = json!({
+        "buckets": rows.len(),
+        "rows": rows.iter().take(FENCE_ROW_CAP).cloned().collect::<Vec<_>>(),
+    });
+    ToolOutcome {
+        summary,
+        trimmed,
         structured: resp.clone(),
         next_actions,
     }

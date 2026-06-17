@@ -14,12 +14,14 @@ use serde_json::{Value, json};
 use crate::api::ApiClient;
 use crate::mcp::render::{
     ErrorKind, NextAction, ToolFailure, project_events_over_time, project_meta,
-    project_numeric_stats, project_query, project_top_events, project_unique_users,
+    project_numeric_histogram, project_numeric_stats, project_query, project_top_events,
+    project_unique_users,
 };
 use crate::mcp::schemas::apply_output_schemas;
 use crate::mcp::tools::{
-    EventsOverTimeParams, NumericStatsParams, TopEventsParams, UniqueUsersParams,
-    events_over_time_query, numeric_stats_query, top_events_query, unique_users_query,
+    EventsOverTimeParams, NumericHistogramParams, NumericStatsParams, TopEventsParams,
+    UniqueUsersParams, events_over_time_query, numeric_histogram_query, numeric_stats_query,
+    top_events_query, unique_users_query,
 };
 
 #[derive(Clone)]
@@ -156,6 +158,33 @@ impl GaugeMcp {
             Err(f) => f.into_result(),
         })
     }
+
+    /// Bucketed count distribution for a numeric attribute. Supply edges (ascending) to define bucket boundaries; rows carry the range label plus count and unique_installs. Use numeric_stats first to learn the value range, then choose edges accordingly.
+    #[tool(annotations(
+        title = "Numeric histogram",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
+    pub async fn numeric_histogram(
+        &self,
+        Parameters(p): Parameters<NumericHistogramParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = match numeric_histogram_query(&p) {
+            Ok(r) => r,
+            Err(msg) => {
+                return Ok(ToolFailure::new(
+                    ErrorKind::InvalidInput,
+                    msg,
+                    "Pass a numeric attribute key from get_meta's numeric_attribute_keys (e.g. \"latency_ms\").",
+                )
+                .into_result());
+            }
+        };
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_numeric_histogram(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
+    }
 }
 
 impl ServerHandler for GaugeMcp {
@@ -205,7 +234,7 @@ mod tests {
         let mut tools = GaugeMcp::tool_router().list_all();
         apply_output_schemas(&mut tools);
 
-        assert_eq!(tools.len(), 6, "expected 6 MCP tools, got {}", tools.len());
+        assert_eq!(tools.len(), 7, "expected 7 MCP tools, got {}", tools.len());
 
         // Every tool is annotated read-only.
         for t in &tools {
@@ -230,6 +259,7 @@ mod tests {
             "top_events",
             "events_over_time",
             "numeric_stats",
+            "numeric_histogram",
         ] {
             let t = tools
                 .iter()

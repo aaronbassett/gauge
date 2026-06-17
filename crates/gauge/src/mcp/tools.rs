@@ -2,7 +2,7 @@
 //! Separated from rmcp glue so they unit-test without a server.
 
 use gauge_query::{
-    Dimension, Dir, Field, Filter, FilterOp, FilterValue, Granularity, Measure, Order,
+    BucketSpec, Dimension, Dir, Field, Filter, FilterOp, FilterValue, Granularity, Measure, Order,
     QueryRequest, TimeRange,
 };
 use schemars::JsonSchema;
@@ -163,6 +163,40 @@ pub fn numeric_stats_query(p: &NumericStatsParams) -> Result<QueryRequest, Strin
     })
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NumericHistogramParams {
+    /// Relative look-back window, e.g. "24h", "7d", "30d".
+    pub period: String,
+    /// Numeric attribute key (from get_meta's `apps[].numeric_attribute_keys`), e.g. "latency_ms".
+    pub field: String,
+    /// Bucket edges (ascending), e.g. [50.0, 200.0, 500.0]. Produces N+1 buckets.
+    pub edges: Vec<f64>,
+    /// Restrict to one app. Omit for all apps.
+    pub app: Option<String>,
+    /// Restrict to one event name. Omit for all events.
+    pub event_name: Option<String>,
+}
+
+pub fn numeric_histogram_query(p: &NumericHistogramParams) -> Result<QueryRequest, String> {
+    let f = attr_field(&p.field)?;
+    Ok(QueryRequest {
+        measures: vec![Measure::Count, Measure::UniqueInstalls],
+        dimensions: vec![Dimension::Bucket {
+            bucket: BucketSpec {
+                field: f,
+                edges: p.edges.clone(),
+            },
+        }],
+        filters: base_filters(&p.app, &p.event_name),
+        time_range: TimeRange::Last {
+            last: p.period.clone(),
+        },
+        granularity: None,
+        order: vec![],
+        limit: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +289,35 @@ mod tests {
         });
         let json = serde_json::to_value(&q).unwrap();
         assert_eq!(json["granularity"], "day");
+        gauge_query::validate(&q).unwrap();
+    }
+
+    #[test]
+    fn numeric_histogram_builds_bucket_dimension() {
+        let q = numeric_histogram_query(&NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0, 500.0],
+            app: Some("tome".into()),
+            event_name: None,
+        })
+        .unwrap();
+        // Must have exactly one Bucket dimension with the supplied edges.
+        assert_eq!(q.dimensions.len(), 1);
+        match &q.dimensions[0] {
+            gauge_query::Dimension::Bucket { bucket } => {
+                assert_eq!(bucket.field.to_string(), "attr.latency_ms");
+                assert_eq!(bucket.edges, vec![50.0, 200.0, 500.0]);
+            }
+            other => panic!("expected Bucket dimension, got {other:?}"),
+        }
+        // Measures must include Count.
+        assert!(
+            q.measures
+                .iter()
+                .any(|m| matches!(m, gauge_query::Measure::Count)),
+            "expected Count in measures"
+        );
         gauge_query::validate(&q).unwrap();
     }
 
