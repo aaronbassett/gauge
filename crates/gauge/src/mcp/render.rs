@@ -6,7 +6,7 @@
 
 use crate::error::ClientError;
 use crate::mcp::tools::{EventsOverTimeParams, TopBy, TopEventsParams, UniqueUsersParams};
-use gauge_query::{QueryRequest, TimeRange};
+use gauge_query::{Field, FilterOp, FilterValue, QueryRequest, TimeRange};
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value, json};
 
@@ -98,10 +98,7 @@ impl ErrorKind {
     }
     /// `false` means an identical retry cannot succeed — recovery needs a different call.
     pub fn retryable(self) -> bool {
-        matches!(
-            self,
-            ErrorKind::InvalidInput | ErrorKind::RateLimited | ErrorKind::CloudError
-        )
+        matches!(self, ErrorKind::RateLimited | ErrorKind::CloudError)
     }
 }
 
@@ -308,14 +305,28 @@ pub fn project_query(resp: &Value, req: &QueryRequest) -> ToolOutcome {
         "get_meta",
         json!({}),
     )];
-    // No granularity + a relative range -> offer a day-bucketed trend over the same period.
+    // No granularity + a relative range -> offer a day-bucketed trend over the same
+    // period, carrying forward any app/event_name equality filter so the suggested
+    // trend keeps the original scope.
     if req.granularity.is_none()
         && let TimeRange::Last { last } = &req.time_range
     {
+        let mut args = json!({ "period": last, "granularity": "day" });
+        for f in &req.filters {
+            if matches!(f.op, FilterOp::Eq)
+                && let Some(FilterValue::One(v)) = &f.value
+            {
+                match &f.field {
+                    Field::App => args["app"] = json!(v),
+                    Field::EventName => args["event_name"] = json!(v),
+                    _ => {}
+                }
+            }
+        }
         next_actions.push(NextAction::call(
             "View this as a day-by-day trend over the same period",
             "events_over_time",
-            json!({ "period": last, "granularity": "day" }),
+            args,
         ));
     }
     let trimmed = json!({
@@ -462,7 +473,7 @@ mod tests {
                     remediation: None,
                 },
                 "INVALID_INPUT",
-                true,
+                false,
             ),
             (
                 ClientError::Api {
@@ -641,5 +652,61 @@ mod tests {
             .expect("structured_content present");
         assert_eq!(sc["truncated"], json!(false));
         assert_eq!(sc["suggested_next_actions"][0]["tool"], json!("get_meta"));
+    }
+
+    #[test]
+    fn project_query_trend_carries_app_filter() {
+        use gauge_query::{Field, Filter, FilterOp, FilterValue};
+        let resp = json!({ "rows": [], "truncated": false, "elapsed_ms": 4 });
+        let req = QueryRequest {
+            measures: vec![gauge_query::Measure::Count],
+            dimensions: vec![],
+            filters: vec![Filter {
+                field: Field::App,
+                op: FilterOp::Eq,
+                value: Some(FilterValue::One("tome".into())),
+            }],
+            time_range: TimeRange::Last { last: "7d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        };
+        let o = project_query(&resp, &req);
+        let trend = o
+            .next_actions
+            .iter()
+            .find(|a| a.tool == Some("events_over_time"))
+            .unwrap();
+        let args = trend.arguments.as_ref().unwrap();
+        assert_eq!(args["period"], json!("7d"));
+        assert_eq!(args["app"], json!("tome"));
+    }
+
+    #[test]
+    fn project_top_events_uses_unique_installs_measure() {
+        let resp = json!({
+            "rows": [ { "event_name": "tome.search", "unique_installs": 88 } ],
+            "truncated": false, "elapsed_ms": 5
+        });
+        let p = TopEventsParams {
+            period: "30d".into(),
+            app: None,
+            by: Some(TopBy::UniqueInstalls),
+            limit: None,
+        };
+        let o = project_top_events(&resp, &p);
+        assert!(
+            o.summary.contains("88"),
+            "summary should read the unique_installs value: {}",
+            o.summary
+        );
+    }
+
+    #[test]
+    fn project_meta_handles_zero_apps() {
+        let resp = json!({ "apps": [] });
+        let o = project_meta(&resp);
+        assert!(o.summary.contains("(none)"));
+        assert!(o.next_actions.is_empty());
     }
 }
