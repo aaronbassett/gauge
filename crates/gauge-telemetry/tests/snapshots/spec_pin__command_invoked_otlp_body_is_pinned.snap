@@ -1,0 +1,92 @@
+---
+source: crates/gauge-telemetry/tests/spec_pin.rs
+expression: body
+---
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "tome"
+            }
+          },
+          {
+            "key": "service.version",
+            "value": {
+              "stringValue": "0.7.0"
+            }
+          },
+          {
+            "key": "service.instance.id",
+            "value": {
+              "stringValue": "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          {
+            "key": "session.id",
+            "value": {
+              "stringValue": "00000000-0000-4000-8000-000000000002"
+            }
+          },
+          {
+            "key": "os.type",
+            "value": {
+              "stringValue": "darwin"
+            }
+          },
+          {
+            "key": "host.arch",
+            "value": {
+              "stringValue": "arm64"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "timeUnixNano": "1781430705123000000",
+              "eventName": "tome.command_invoked",
+              "attributes": [
+                {
+                  "key": "event.name",
+                  "value": {
+                    "stringValue": "tome.command_invoked"
+                  }
+                },
+                {
+                  "key": "command",
+                  "value": {
+                    "stringValue": "search"
+                  }
+                },
+                {
+                  "key": "duration_ms",
+                  "value": {
+                    "intValue": "142"
+                  }
+                },
+                {
+                  "key": "outcome",
+                  "value": {
+                    "stringValue": "ok"
+                  }
+                },
+                {
+                  "key": "surface",
+                  "value": {
+                    "stringValue": "cli"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
