@@ -4,6 +4,7 @@
 //! `structured_content` (with `suggested_next_actions`). Failure → an
 //! `is_error: true` result carrying a shared error envelope.
 
+use crate::error::ClientError;
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value, json};
 
@@ -71,9 +72,216 @@ impl ToolOutcome {
     }
 }
 
+/// Closed set of tool-execution error kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    Unauthenticated,
+    InvalidInput,
+    NotFound,
+    RateLimited,
+    CloudError,
+    Internal,
+}
+
+impl ErrorKind {
+    pub fn code(self) -> &'static str {
+        match self {
+            ErrorKind::Unauthenticated => "UNAUTHENTICATED",
+            ErrorKind::InvalidInput => "INVALID_INPUT",
+            ErrorKind::NotFound => "NOT_FOUND",
+            ErrorKind::RateLimited => "RATE_LIMITED",
+            ErrorKind::CloudError => "CLOUD_ERROR",
+            ErrorKind::Internal => "INTERNAL",
+        }
+    }
+    /// `false` means an identical retry cannot succeed — recovery needs a different call.
+    pub fn retryable(self) -> bool {
+        matches!(
+            self,
+            ErrorKind::InvalidInput | ErrorKind::RateLimited | ErrorKind::CloudError
+        )
+    }
+}
+
+/// A tool-execution failure, pre-render (becomes an `is_error: true` result).
+pub struct ToolFailure {
+    pub kind: ErrorKind,
+    pub message: String,
+    pub guidance: String,
+    pub details: Value,
+    pub next_actions: Vec<NextAction>,
+}
+
+impl ToolFailure {
+    pub fn new(kind: ErrorKind, message: impl Into<String>, guidance: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            guidance: guidance.into(),
+            details: Value::Null,
+            next_actions: Vec::new(),
+        }
+    }
+
+    pub fn with_actions(mut self, actions: Vec<NextAction>) -> Self {
+        self.next_actions = actions;
+        self
+    }
+
+    fn discover_meta_action() -> NextAction {
+        NextAction::call(
+            "Discover queryable apps, event names, and attribute keys",
+            "get_meta",
+            json!({}),
+        )
+    }
+
+    pub fn from_client_error(e: ClientError) -> Self {
+        let msg = e.to_string();
+        match e {
+            ClientError::Auth(_)
+            | ClientError::KeyMissing(_)
+            | ClientError::KeyExists(_)
+            | ClientError::ConfigMissing(_)
+            | ClientError::ConfigInvalid(_)
+            | ClientError::NoConfigDir => ToolFailure::new(
+                ErrorKind::Unauthenticated,
+                msg,
+                "Authentication or local config is not set up.",
+            )
+            .with_actions(vec![NextAction::user(
+                "Ask the user to run `gauge login` (and `gauge keys generate` if no key exists).",
+            )]),
+            ClientError::Api {
+                status,
+                code,
+                message,
+                remediation,
+            } => {
+                let kind = match status {
+                    400 => ErrorKind::InvalidInput,
+                    401 | 403 => ErrorKind::Unauthenticated,
+                    404 => ErrorKind::NotFound,
+                    429 => ErrorKind::RateLimited,
+                    _ => ErrorKind::CloudError,
+                };
+                let guidance = remediation.unwrap_or_else(|| {
+                    match kind {
+                        ErrorKind::InvalidInput => "Fix the request arguments and retry; call get_meta to discover valid apps and event names.",
+                        ErrorKind::NotFound => "Re-derive identifiers from get_meta before retrying.",
+                        ErrorKind::RateLimited => "Rate limit hit — wait for the window to reset, then retry.",
+                        ErrorKind::Unauthenticated => "Re-authenticate (`gauge login`) and retry.",
+                        _ => "The server returned an error; retry shortly.",
+                    }
+                    .to_owned()
+                });
+                let mut f = ToolFailure::new(kind, message, guidance);
+                f.details = json!({ "server_code": code, "status": status });
+                if matches!(kind, ErrorKind::InvalidInput | ErrorKind::NotFound) {
+                    f = f.with_actions(vec![Self::discover_meta_action()]);
+                }
+                f
+            }
+            ClientError::Http(m) => ToolFailure::new(
+                ErrorKind::CloudError,
+                format!("http error: {m}"),
+                "Could not reach the gauge server; retry shortly.",
+            ),
+            ClientError::Io(_) | ClientError::Json(_) => ToolFailure::new(
+                ErrorKind::Internal,
+                msg,
+                "An internal error occurred while processing the response.",
+            ),
+        }
+    }
+
+    pub fn into_result(self) -> CallToolResult {
+        let mut error = json!({
+            "code": self.kind.code(),
+            "retryable": self.kind.retryable(),
+            "message": self.message,
+        });
+        if let (Value::Object(emap), Value::Object(dmap)) = (&mut error, &self.details) {
+            for (k, v) in dmap {
+                emap.insert(k.clone(), v.clone());
+            }
+        }
+        let structured =
+            json!({ "error": error, "suggested_next_actions": actions_value(&self.next_actions) });
+        let trimmed = serde_json::to_string(
+            &json!({ "error": { "code": self.kind.code(), "retryable": self.kind.retryable() } }),
+        )
+        .unwrap_or_else(|_| "{}".to_owned());
+        let text = format!("{}\n\n```json\n{trimmed}\n```", self.guidance);
+        let mut result = CallToolResult::error(vec![Content::text(text)]);
+        result.structured_content = Some(structured);
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::error::ClientError;
+
+    #[test]
+    fn client_errors_map_to_codes() {
+        let cases = [
+            (ClientError::NoConfigDir, "UNAUTHENTICATED", false),
+            (ClientError::Http("boom".into()), "CLOUD_ERROR", true),
+            (
+                ClientError::Api {
+                    status: 400,
+                    code: "bad".into(),
+                    message: "nope".into(),
+                    remediation: None,
+                },
+                "INVALID_INPUT",
+                true,
+            ),
+            (
+                ClientError::Api {
+                    status: 404,
+                    code: "missing".into(),
+                    message: "nope".into(),
+                    remediation: None,
+                },
+                "NOT_FOUND",
+                false,
+            ),
+            (
+                ClientError::Api {
+                    status: 429,
+                    code: "slow".into(),
+                    message: "nope".into(),
+                    remediation: None,
+                },
+                "RATE_LIMITED",
+                true,
+            ),
+            (
+                ClientError::Api {
+                    status: 503,
+                    code: "down".into(),
+                    message: "nope".into(),
+                    remediation: None,
+                },
+                "CLOUD_ERROR",
+                true,
+            ),
+        ];
+        for (err, code, retryable) in cases {
+            let f = ToolFailure::from_client_error(err);
+            assert_eq!(f.kind.code(), code);
+            assert_eq!(f.kind.retryable(), retryable);
+            let result = f.into_result();
+            assert_eq!(result.is_error, Some(true));
+            let sc = result.structured_content.unwrap();
+            assert_eq!(sc["error"]["code"], json!(code));
+            assert_eq!(sc["error"]["retryable"], json!(retryable));
+        }
+    }
 
     #[test]
     fn outcome_renders_summary_fence_and_structured() {
