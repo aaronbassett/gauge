@@ -478,7 +478,7 @@ pub fn project_numeric_stats(resp: &Value, p: &NumericStatsParams) -> ToolOutcom
     }
 }
 
-/// `numeric_histogram` -> rows `{ bucket: "<label>", count, unique_installs }`.
+/// `numeric_histogram` -> rows `{ <bucket_alias>: "<label>", count, unique_installs }`.
 pub fn project_numeric_histogram(resp: &Value, p: &NumericHistogramParams) -> ToolOutcome {
     let rows = rows_of(resp);
     let key = &p.field;
@@ -488,6 +488,20 @@ pub fn project_numeric_histogram(resp: &Value, p: &NumericHistogramParams) -> To
         (None, Some(e)) => e.clone(),
         (None, None) => "all apps".to_owned(),
     };
+    // Resolve the bucket column key: prefer the alias echoed in the response meta, fall back to
+    // the canonical "attr.<bare_field>" form that the server always uses as the alias.
+    let bucket_col: String = resp
+        .get("meta")
+        .and_then(|m| m.get("buckets"))
+        .and_then(Value::as_array)
+        .and_then(|b| b.first())
+        .and_then(|b| b.get("alias"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            let bare = p.field.strip_prefix("attr.").unwrap_or(p.field.as_str());
+            format!("attr.{bare}")
+        });
     // Find the peak bucket by count.
     let peak = rows
         .iter()
@@ -498,7 +512,9 @@ pub fn project_numeric_histogram(resp: &Value, p: &NumericHistogramParams) -> To
             p.period,
             rows.len(),
             r.get("count").and_then(Value::as_i64).unwrap_or(0),
-            r.get("bucket").and_then(Value::as_str).unwrap_or("?"),
+            r.get(bucket_col.as_str())
+                .and_then(Value::as_str)
+                .unwrap_or("?"),
         ),
         None => format!("{key} distribution ({scope}, {}): 0 buckets.", p.period),
     };
@@ -516,9 +532,12 @@ pub fn project_numeric_histogram(resp: &Value, p: &NumericHistogramParams) -> To
         "numeric_stats",
         stats_args,
     )];
+    // A histogram's distribution shape is the whole point — show up to MAX_BUCKET_EDGES + 1 rows
+    // (the full set of possible buckets) rather than the generic FENCE_ROW_CAP (3).
+    let hist_row_cap = gauge_query::MAX_BUCKET_EDGES + 1;
     let trimmed = json!({
         "buckets": rows.len(),
-        "rows": rows.iter().take(FENCE_ROW_CAP).cloned().collect::<Vec<_>>(),
+        "rows": rows.iter().take(hist_row_cap).cloned().collect::<Vec<_>>(),
     });
     ToolOutcome {
         summary,
@@ -864,5 +883,133 @@ mod tests {
                 .all(|a| a.tool != Some("events_over_time")),
             "bucket dimension should suppress the events_over_time suggestion"
         );
+    }
+
+    /// Verifies that the projector reads the bucket column by alias (e.g. "attr.latency_ms"),
+    /// not the literal key "bucket". This is the assertion that catches the pre-fix bug where
+    /// `r.get("bucket")` always returned `None` and the summary always printed "?".
+    #[test]
+    fn project_numeric_histogram_names_peak_bucket_label() {
+        // Realistic response: rows keyed by "attr.latency_ms" (the server-assigned alias),
+        // plus meta that echoes the alias so the projector can resolve the column key.
+        let resp = json!({
+            "rows": [
+                { "attr.latency_ms": "<50",     "count": 120, "unique_installs": 80  },
+                { "attr.latency_ms": "50-200",  "count": 450, "unique_installs": 310 },
+                { "attr.latency_ms": "200+",    "count": 90,  "unique_installs": 60  }
+            ],
+            "truncated": false,
+            "elapsed_ms": 12,
+            "meta": {
+                "buckets": [
+                    {
+                        "field": "attr.latency_ms",
+                        "alias": "attr.latency_ms",
+                        "edges": [50, 200],
+                        "labels": ["<50", "50-200", "200+"]
+                    }
+                ]
+            }
+        });
+        let p = NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0],
+            app: None,
+            event_name: None,
+        };
+        let o = project_numeric_histogram(&resp, &p);
+
+        // Must name the actual peak bucket label ("50-200"), not the fallback "?".
+        assert!(
+            o.summary.contains("50-200"),
+            "summary should name the peak bucket label '50-200', got: {}",
+            o.summary
+        );
+        // Must report the correct count for the peak bucket.
+        assert!(
+            o.summary.contains("450"),
+            "summary should contain the peak count 450, got: {}",
+            o.summary
+        );
+        // next_actions must include a numeric_stats drill-down.
+        assert!(
+            o.next_actions
+                .iter()
+                .any(|a| a.tool == Some("numeric_stats")),
+            "expected a numeric_stats next action"
+        );
+    }
+
+    #[test]
+    fn project_numeric_histogram_empty_rows_no_panic() {
+        let resp = json!({
+            "rows": [],
+            "truncated": false,
+            "elapsed_ms": 5,
+            "meta": {
+                "buckets": [
+                    {
+                        "field": "attr.latency_ms",
+                        "alias": "attr.latency_ms",
+                        "edges": [50, 200],
+                        "labels": ["<50", "50-200", "200+"]
+                    }
+                ]
+            }
+        });
+        let p = NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0],
+            app: None,
+            event_name: None,
+        };
+        let o = project_numeric_histogram(&resp, &p);
+        // Empty rows should produce a "0 buckets" summary without panicking.
+        assert!(
+            o.summary.contains("0 buckets"),
+            "empty rows should produce a '0 buckets' summary, got: {}",
+            o.summary
+        );
+    }
+
+    #[test]
+    fn project_numeric_histogram_next_action_targets_numeric_stats() {
+        let resp = json!({
+            "rows": [
+                { "attr.latency_ms": "50-200", "count": 300, "unique_installs": 200 }
+            ],
+            "truncated": false,
+            "elapsed_ms": 8,
+            "meta": {
+                "buckets": [
+                    {
+                        "field": "attr.latency_ms",
+                        "alias": "attr.latency_ms",
+                        "edges": [50, 200],
+                        "labels": ["<50", "50-200", "200+"]
+                    }
+                ]
+            }
+        });
+        let p = NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0],
+            app: Some("tome".into()),
+            event_name: Some("tome.search".into()),
+        };
+        let o = project_numeric_histogram(&resp, &p);
+        let stats_action = o
+            .next_actions
+            .iter()
+            .find(|a| a.tool == Some("numeric_stats"))
+            .expect("expected a numeric_stats next action");
+        let args = stats_action.arguments.as_ref().unwrap();
+        assert_eq!(args["field"], json!("latency_ms"));
+        assert_eq!(args["period"], json!("7d"));
+        assert_eq!(args["app"], json!("tome"));
+        assert_eq!(args["event_name"], json!("tome.search"));
     }
 }

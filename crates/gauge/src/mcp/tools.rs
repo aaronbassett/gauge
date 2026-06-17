@@ -169,7 +169,7 @@ pub struct NumericHistogramParams {
     pub period: String,
     /// Numeric attribute key (from get_meta's `apps[].numeric_attribute_keys`), e.g. "latency_ms".
     pub field: String,
-    /// Bucket edges (ascending), e.g. [50.0, 200.0, 500.0]. Produces N+1 buckets.
+    /// Bucket edges (ascending), e.g. [50.0, 200.0, 500.0]. Produces N+1 buckets. Maximum 32 edges.
     pub edges: Vec<f64>,
     /// Restrict to one app. Omit for all apps.
     pub app: Option<String>,
@@ -179,6 +179,9 @@ pub struct NumericHistogramParams {
 
 pub fn numeric_histogram_query(p: &NumericHistogramParams) -> Result<QueryRequest, String> {
     let f = attr_field(&p.field)?;
+    if p.edges.is_empty() {
+        return Err("edges must not be empty".into());
+    }
     Ok(QueryRequest {
         measures: vec![Measure::Count, Measure::UniqueInstalls],
         dimensions: vec![Dimension::Bucket {
@@ -317,6 +320,13 @@ mod tests {
                 .iter()
                 .any(|m| matches!(m, gauge_query::Measure::Count)),
             "expected Count in measures"
+        );
+        // Measures must also include UniqueInstalls so callers can see per-bucket user spread.
+        assert!(
+            q.measures
+                .iter()
+                .any(|m| matches!(m, gauge_query::Measure::UniqueInstalls)),
+            "expected UniqueInstalls in measures"
         );
         gauge_query::validate(&q).unwrap();
     }
