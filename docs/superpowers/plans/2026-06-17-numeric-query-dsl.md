@@ -14,8 +14,8 @@
 
 ## Conventions (read once)
 
-- **Test a crate:** `cargo test -p gauge-query` · `cargo test -p gauge-server` · `cargo test -p gauge`
-- **Lint before each commit:** `cargo clippy --workspace --all-targets -- -D warnings`
+- **Test a crate:** `cargo test -p gauge-query` · `cargo test -p gauge-server` · `cargo test -p gauge-client` (the client crate's package name is **`gauge-client`**, even though its directory is `crates/gauge` — `-p gauge` will error).
+- **Format + lint before EVERY commit (CI gate):** `cargo fmt --all` then `cargo clippy --workspace --all-targets -- -D warnings`. CI runs `cargo fmt --all --check`, so an unformatted commit fails the build — always run `cargo fmt --all` before committing (the code blocks in this plan are not all rustfmt-normalized).
 - **New/changed insta snapshots:** run the test (it will fail with a pending snapshot), then accept with `cargo insta accept` (install once with `cargo install cargo-insta` if missing) — or `INSTA_UPDATE=always cargo test -p gauge-server`. Always eyeball the `.snap` before committing.
 - **Commit trailer:** every commit ends with
   `git commit -m "<type>(<scope>): <subject>" -m "Co-Authored-By: Claude Code <noreply@anthropic.com>"`
@@ -933,7 +933,7 @@ git commit -m "feat(meta): report numeric_attribute_keys for discovery" -m "Co-A
     }
 ```
 
-Run: `cargo test -p gauge accepts_numeric_bucket_aggregate_and_filter` → PASS (passthrough already works).
+Run: `cargo test -p gauge-client accepts_numeric_bucket_aggregate_and_filter` → PASS (passthrough already works).
 
 - [ ] **Step 2: Update the README Query DSL section.** Replace the `**Measures:**`, `**Dimensions:**`, and `**Filters:**` bullets (around `README.md:239-241`) with:
 
@@ -1010,7 +1010,7 @@ git commit -m "docs(cli): document numeric query DSL with a worked example" -m "
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cargo test -p gauge project_query_skips_trend_for_aggregate`
+Run: `cargo test -p gauge-client project_query_skips_trend_for_aggregate`
 Expected: FAIL — the trend action is still suggested.
 
 - [ ] **Step 3: Guard the trend suggestion** in `render.rs` `project_query`. Replace the whole `if req.granularity.is_none() && let TimeRange::Last { last } = &req.time_range { ... }` block (the one that pushes the `events_over_time` action) with the version below, which adds an `is_plain` gate so the trend is only suggested for plain count-style queries:
@@ -1042,7 +1042,7 @@ Expected: FAIL — the trend action is still suggested.
     }
 ```
 
-Run: `cargo test -p gauge project_query_skips_trend_for_aggregate` → PASS.
+Run: `cargo test -p gauge-client project_query_skips_trend_for_aggregate` → PASS.
 
 - [ ] **Step 4: Extend the `query_telemetry` tool description** in `server.rs`. Replace the doc-comment above `pub async fn query_telemetry` with:
 
@@ -1052,7 +1052,7 @@ Run: `cargo test -p gauge project_query_skips_trend_for_aggregate` → PASS.
 
 - [ ] **Step 5: Run, lint, commit**
 
-Run: `cargo test -p gauge && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
+Run: `cargo test -p gauge-client && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
 
 ```bash
 git add crates/gauge/src/mcp/server.rs crates/gauge/src/mcp/render.rs
@@ -1089,7 +1089,7 @@ git commit -m "feat(mcp): document numeric DSL in query_telemetry; render skips 
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cargo test -p gauge numeric_stats_builds_all_aggregates`
+Run: `cargo test -p gauge-client numeric_stats_builds_all_aggregates`
 Expected: FAIL — `NumericStatsParams` not found.
 
 - [ ] **Step 3: Add params + builder** in `tools.rs`. Add a helper to turn a bare attr key into a `Field`, then the param struct and builder:
@@ -1129,7 +1129,7 @@ pub fn numeric_stats_query(p: &NumericStatsParams) -> QueryRequest {
 }
 ```
 
-Run: `cargo test -p gauge numeric_stats_builds_all_aggregates` → PASS.
+Run: `cargo test -p gauge-client numeric_stats_builds_all_aggregates` → PASS.
 
 - [ ] **Step 4: Add the projector** in `render.rs`:
 
@@ -1188,7 +1188,7 @@ pub fn project_numeric_stats(resp: &Value, p: &crate::mcp::tools::NumericStatsPa
 
 - [ ] **Step 7: Run, lint, commit** (the tool-count test still expects 5 here and will be updated in Task 8; temporarily it will list 6 — update the literal `5` in `server.rs` test `tool_list_has_annotations_and_output_schemas` to `6` and add `"numeric_stats"` to the schema-checking name list):
 
-Run: `cargo test -p gauge && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
+Run: `cargo test -p gauge-client && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
 
 ```bash
 git add crates/gauge/src/mcp
@@ -1224,7 +1224,7 @@ git commit -m "feat(mcp): add numeric_stats tool (avg/min/max/percentiles)" -m "
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cargo test -p gauge numeric_histogram_builds_bucket_dimension`
+Run: `cargo test -p gauge-client numeric_histogram_builds_bucket_dimension`
 Expected: FAIL — `NumericHistogramParams` not found.
 
 - [ ] **Step 3: Add params + builder** in `tools.rs` (add `BucketSpec, Dimension` to the `use gauge_query::{...}` import):
@@ -1259,7 +1259,7 @@ pub fn numeric_histogram_query(p: &NumericHistogramParams) -> QueryRequest {
 }
 ```
 
-Run: `cargo test -p gauge numeric_histogram_builds_bucket_dimension` → PASS.
+Run: `cargo test -p gauge-client numeric_histogram_builds_bucket_dimension` → PASS.
 
 - [ ] **Step 4: Add the projector** in `render.rs`:
 
@@ -1312,7 +1312,7 @@ In the `tool_list_has_annotations_and_output_schemas` test, change `assert_eq!(t
 
 - [ ] **Step 6: Run, lint, commit**
 
-Run: `cargo test -p gauge && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
+Run: `cargo test -p gauge-client && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
 
 ```bash
 git add crates/gauge/src/mcp
@@ -1346,7 +1346,7 @@ mod tests {
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cargo test -p gauge derive_edges_are_sorted_rounded_and_bounded`
+Run: `cargo test -p gauge-client derive_edges_are_sorted_rounded_and_bounded`
 Expected: FAIL — `derive_edges` not found.
 
 - [ ] **Step 3: Implement the helpers** in `data.rs`:
@@ -1381,7 +1381,7 @@ pub fn derive_edges(min: f64, max: f64) -> Vec<f64> {
 
 - [ ] **Step 4: Run, lint, commit**
 
-Run: `cargo test -p gauge derive_edges_are_sorted_rounded_and_bounded && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
+Run: `cargo test -p gauge-client derive_edges_are_sorted_rounded_and_bounded && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
 
 ```bash
 git add crates/gauge/src/tui/data.rs
@@ -1419,7 +1419,7 @@ mod tests {
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cargo test -p gauge explore_request_supports_numeric_aggregate`
+Run: `cargo test -p gauge-client explore_request_supports_numeric_aggregate`
 Expected: FAIL — `numeric_attr` / `NUMERIC_MEASURE_BASE` not found.
 
 - [ ] **Step 3: Extend the Explore state + measures** in `app.rs`. Add a numeric-measure list and a base index, and a selected numeric attr:
@@ -1468,7 +1468,7 @@ Add to `struct ExploreState`:
 
 (Note: the explicit `order` is dropped here because a numeric aggregate alias like `avg_latency_ms` would not match the literal measure name; default ordering is fine for Explore.)
 
-Run: `cargo test -p gauge explore_request_supports_numeric_aggregate` → PASS.
+Run: `cargo test -p gauge-client explore_request_supports_numeric_aggregate` → PASS.
 
 - [ ] **Step 5: Let the user cycle the numeric attr.** In `app.rs` `on_key`, add a binding (only on the Explore page) to cycle `numeric_attr` through the union of `numeric_attribute_keys` from the current snapshot. Add a key, e.g. `n`:
 
@@ -1511,7 +1511,7 @@ Run: `cargo test -p gauge explore_request_supports_numeric_aggregate` → PASS.
 
 - [ ] **Step 7: Run, lint, commit**
 
-Run: `cargo test -p gauge && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
+Run: `cargo test -p gauge-client && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
 
 ```bash
 git add crates/gauge/src/tui/app.rs crates/gauge/src/tui/ui.rs
@@ -1545,7 +1545,7 @@ git commit -m "feat(tui): numeric aggregate measures over a chosen attr in Explo
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cargo test -p gauge histogram_probe_then_bucket_request_shapes`
+Run: `cargo test -p gauge-client histogram_probe_then_bucket_request_shapes`
 Expected: FAIL — request builders not found.
 
 - [ ] **Step 3: Add the request builders + async fetch** in `data.rs` (add `BucketSpec, Dimension` to the `use gauge_query::{...}` import):
@@ -1588,7 +1588,7 @@ pub async fn fetch_histogram(
 
 (Add `use gauge_query::QueryResponse;` if not already imported — `app.rs` imports it, `data.rs` needs it here.)
 
-Run: `cargo test -p gauge histogram_probe_then_bucket_request_shapes` → PASS.
+Run: `cargo test -p gauge-client histogram_probe_then_bucket_request_shapes` → PASS.
 
 - [ ] **Step 4: Add histogram state + trigger** in `app.rs`. Add to `struct ExploreState`:
 
@@ -1676,7 +1676,7 @@ Add to the `match msg { ... }` arms:
 
 - [ ] **Step 7: Run, lint, commit**
 
-Run: `cargo test -p gauge && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
+Run: `cargo test -p gauge-client && cargo clippy --workspace --all-targets -- -D warnings` → PASS.
 
 ```bash
 git add crates/gauge/src/tui
