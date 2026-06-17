@@ -66,17 +66,24 @@ fn numeric_field_expr(f: &Field, binds: &mut Vec<Bind>) -> String {
         unreachable!("validated: numeric ops require an attr.<key> field")
     };
     let p = ph(binds, Bind::Text(k.clone()));
-    format!("CASE WHEN jsonb_typeof(attributes->{p}) = 'number' THEN (attributes->>{p})::double precision END")
+    format!(
+        "CASE WHEN jsonb_typeof(attributes->{p}) = 'number' THEN (attributes->>{p})::double precision END"
+    )
 }
 
 fn percentile_expr(f: &Field, frac: &str, binds: &mut Vec<Bind>) -> String {
     // `frac` is a fixed literal per measure variant — never user input.
-    format!("percentile_cont({frac}) WITHIN GROUP (ORDER BY {})", numeric_field_expr(f, binds))
+    format!(
+        "percentile_cont({frac}) WITHIN GROUP (ORDER BY {})",
+        numeric_field_expr(f, binds)
+    )
 }
 
 /// Decode an `f64` column (NULL → JSON null; non-finite → null).
 pub fn float_value(v: Option<f64>) -> Value {
-    v.and_then(serde_json::Number::from_f64).map(Value::Number).unwrap_or(Value::Null)
+    v.and_then(serde_json::Number::from_f64)
+        .map(Value::Number)
+        .unwrap_or(Value::Null)
 }
 
 pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, QueryError> {
@@ -119,9 +126,18 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
             Measure::Count => ("COUNT(*)".to_string(), ColKind::Int),
             Measure::UniqueInstalls => ("COUNT(DISTINCT install_id)".to_string(), ColKind::Int),
             Measure::UniqueSessions => ("COUNT(DISTINCT session_id)".to_string(), ColKind::Int),
-            Measure::Avg(f) => (format!("AVG({})", numeric_field_expr(f, &mut binds)), ColKind::Float),
-            Measure::Min(f) => (format!("MIN({})", numeric_field_expr(f, &mut binds)), ColKind::Float),
-            Measure::Max(f) => (format!("MAX({})", numeric_field_expr(f, &mut binds)), ColKind::Float),
+            Measure::Avg(f) => (
+                format!("AVG({})", numeric_field_expr(f, &mut binds)),
+                ColKind::Float,
+            ),
+            Measure::Min(f) => (
+                format!("MIN({})", numeric_field_expr(f, &mut binds)),
+                ColKind::Float,
+            ),
+            Measure::Max(f) => (
+                format!("MAX({})", numeric_field_expr(f, &mut binds)),
+                ColKind::Float,
+            ),
             Measure::P50(f) => (percentile_expr(f, "0.5", &mut binds), ColKind::Float),
             Measure::P90(f) => (percentile_expr(f, "0.9", &mut binds), ColKind::Float),
             Measure::P95(f) => (percentile_expr(f, "0.95", &mut binds), ColKind::Float),
@@ -305,7 +321,8 @@ mod tests {
         let req: QueryRequest = serde_json::from_str(
             r#"{"measures":["count",{"avg":"attr.latency_ms"},{"p95":"attr.latency_ms"}],
                 "dimensions":["app"],"time_range":{"last":"7d"}}"#,
-        ).unwrap();
+        )
+        .unwrap();
         insta::assert_snapshot!(build(&req, NOW).unwrap().sql);
     }
 
@@ -315,7 +332,8 @@ mod tests {
             r#"{"measures":["count"],
                 "filters":[{"field":"attr.latency_ms","op":"gt","value":4242}],
                 "time_range":{"last":"7d"}}"#,
-        ).unwrap();
+        )
+        .unwrap();
         let built = build(&req, NOW).unwrap();
         // the numeric filter value is bound, never spliced into SQL text
         assert!(!built.sql.contains("4242"));

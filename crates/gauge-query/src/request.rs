@@ -41,7 +41,10 @@ impl Measure {
     /// Output column alias. Aggregates → `{fn}_{attr-key}` (e.g. `avg_latency_ms`).
     pub fn alias(&self) -> String {
         fn key(f: &Field) -> String {
-            match f { Field::Attr(k) => k.clone(), other => other.to_string() }
+            match f {
+                Field::Attr(k) => k.clone(),
+                other => other.to_string(),
+            }
         }
         match self {
             Measure::Count => "count".into(),
@@ -59,8 +62,13 @@ impl Measure {
     /// The numeric attr field an aggregate operates on, if any.
     pub fn numeric_field(&self) -> Option<&Field> {
         match self {
-            Measure::Avg(f) | Measure::Min(f) | Measure::Max(f)
-            | Measure::P50(f) | Measure::P90(f) | Measure::P95(f) | Measure::P99(f) => Some(f),
+            Measure::Avg(f)
+            | Measure::Min(f)
+            | Measure::Max(f)
+            | Measure::P50(f)
+            | Measure::P90(f)
+            | Measure::P95(f)
+            | Measure::P99(f) => Some(f),
             _ => None,
         }
     }
@@ -103,12 +111,17 @@ impl<'de> serde::Deserialize<'de> for Measure {
                     other => Err(E::custom(format!("unknown measure `{other}`"))),
                 }
             }
-            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Measure, A::Error> {
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Measure, A::Error> {
                 let entry: Option<(String, Field)> = map.next_entry()?;
                 let (name, field) = entry
                     .ok_or_else(|| serde::de::Error::custom("empty aggregate measure object"))?;
                 if map.next_key::<String>()?.is_some() {
-                    return Err(serde::de::Error::custom("aggregate measure must have exactly one key"));
+                    return Err(serde::de::Error::custom(
+                        "aggregate measure must have exactly one key",
+                    ));
                 }
                 match name.as_str() {
                     "avg" => Ok(Measure::Avg(field)),
@@ -118,7 +131,9 @@ impl<'de> serde::Deserialize<'de> for Measure {
                     "p90" => Ok(Measure::P90(field)),
                     "p95" => Ok(Measure::P95(field)),
                     "p99" => Ok(Measure::P99(field)),
-                    other => Err(serde::de::Error::custom(format!("unknown aggregate `{other}`"))),
+                    other => Err(serde::de::Error::custom(format!(
+                        "unknown aggregate `{other}`"
+                    ))),
                 }
             }
         }
@@ -127,7 +142,9 @@ impl<'de> serde::Deserialize<'de> for Measure {
 }
 
 impl schemars::JsonSchema for Measure {
-    fn schema_name() -> std::borrow::Cow<'static, str> { "Measure".into() }
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Measure".into()
+    }
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "description": "A simple measure name, or a single-key aggregate object over a numeric attr.<key>.",
@@ -154,7 +171,16 @@ pub struct Filter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum FilterOp { Eq, Neq, In, Exists, Gt, Gte, Lt, Lte }
+pub enum FilterOp {
+    Eq,
+    Neq,
+    In,
+    Exists,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
@@ -212,16 +238,27 @@ mod tests {
     #[test]
     fn measure_serde_simple_and_aggregate() {
         // simple measures stay strings
-        assert_eq!(serde_json::to_value(&Measure::Count).unwrap(), serde_json::json!("count"));
+        assert_eq!(
+            serde_json::to_value(&Measure::Count).unwrap(),
+            serde_json::json!("count")
+        );
         let m: Measure = serde_json::from_value(serde_json::json!("unique_installs")).unwrap();
         assert_eq!(m, Measure::UniqueInstalls);
         // aggregates are single-key objects keyed by the agg name
-        let avg: Measure = serde_json::from_value(serde_json::json!({"avg": "attr.latency_ms"})).unwrap();
+        let avg: Measure =
+            serde_json::from_value(serde_json::json!({"avg": "attr.latency_ms"})).unwrap();
         assert!(matches!(&avg, Measure::Avg(f) if f.to_string() == "attr.latency_ms"));
-        assert_eq!(serde_json::to_value(&avg).unwrap(), serde_json::json!({"avg": "attr.latency_ms"}));
-        let p95: Measure = serde_json::from_value(serde_json::json!({"p95": "attr.latency_ms"})).unwrap();
+        assert_eq!(
+            serde_json::to_value(&avg).unwrap(),
+            serde_json::json!({"avg": "attr.latency_ms"})
+        );
+        let p95: Measure =
+            serde_json::from_value(serde_json::json!({"p95": "attr.latency_ms"})).unwrap();
         assert_eq!(p95.alias(), "p95_latency_ms");
         // a two-key aggregate object is rejected
-        assert!(serde_json::from_value::<Measure>(serde_json::json!({"avg":"attr.a","min":"attr.b"})).is_err());
+        assert!(
+            serde_json::from_value::<Measure>(serde_json::json!({"avg":"attr.a","min":"attr.b"}))
+                .is_err()
+        );
     }
 }

@@ -91,14 +91,19 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
                     return Err(QueryError::BadFilter(fname, opname, "an attr.<key> field"));
                 }
             }
-            (FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte, Some(FilterValue::Num(_))) => {
+            (
+                FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte,
+                Some(FilterValue::Num(_)),
+            ) => {
                 if !matches!(f.field, Field::Attr(_)) {
                     return Err(QueryError::NumericFieldRequired(fname));
                 }
             }
             (FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte, _) => {
                 return Err(QueryError::BadFilter(
-                    fname, opname, "a numeric value on an attr.<key> field",
+                    fname,
+                    opname,
+                    "a numeric value on an attr.<key> field",
                 ));
             }
             (FilterOp::Eq | FilterOp::Neq, _) => {
@@ -145,7 +150,10 @@ mod tests {
         let ok = req_with(vec![Measure::Avg(Field::Attr("latency_ms".into()))]);
         assert!(validate(&ok).is_ok());
         let bad = req_with(vec![Measure::Avg(Field::Os)]);
-        assert!(matches!(validate(&bad), Err(QueryError::NumericFieldRequired(_))));
+        assert!(matches!(
+            validate(&bad),
+            Err(QueryError::NumericFieldRequired(_))
+        ));
     }
 
     #[test]
@@ -160,7 +168,10 @@ mod tests {
         assert!(validate(&r).is_ok());
         // gt on a non-attr field is rejected
         r.filters[0].field = Field::Os;
-        assert!(matches!(validate(&r), Err(QueryError::NumericFieldRequired(_))));
+        assert!(matches!(
+            validate(&r),
+            Err(QueryError::NumericFieldRequired(_))
+        ));
         // gt with a string value is rejected
         r.filters[0].field = Field::Attr("latency_ms".into());
         r.filters[0].value = Some(FilterValue::One("500".into()));
