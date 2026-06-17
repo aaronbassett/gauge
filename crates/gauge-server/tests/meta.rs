@@ -22,6 +22,7 @@ async fn meta_reports_apps_events_and_keys(pool: PgPool) {
     let mut attributes = serde_json::Map::new();
     attributes.insert("surface".into(), serde_json::json!("cli"));
     attributes.insert("latency_bucket".into(), serde_json::json!("50-200ms"));
+    attributes.insert("latency_ms".into(), serde_json::json!(42));
     let ev = ParsedEvent {
         event_name: "tome.search".into(),
         time: OffsetDateTime::now_utc(),
@@ -47,7 +48,20 @@ async fn meta_reports_apps_events_and_keys(pool: PgPool) {
     assert_eq!(apps[0]["event_names"], serde_json::json!(["tome.search"]));
     assert_eq!(
         apps[0]["attribute_keys"],
-        serde_json::json!(["latency_bucket", "surface"])
+        serde_json::json!(["latency_bucket", "latency_ms", "surface"])
+    );
+    let numeric_keys = apps[0]["numeric_attribute_keys"].as_array().unwrap();
+    assert!(
+        numeric_keys.iter().any(|k| k == "latency_ms"),
+        "numeric_attribute_keys should contain 'latency_ms'"
+    );
+    assert!(
+        !numeric_keys.iter().any(|k| k == "surface"),
+        "numeric_attribute_keys should not contain string-valued key 'surface'"
+    );
+    assert!(
+        !numeric_keys.iter().any(|k| k == "latency_bucket"),
+        "numeric_attribute_keys should not contain string-valued key 'latency_bucket'"
     );
     assert_eq!(apps[0]["total_events"], 1);
     assert!(apps[0]["first_event"].is_string());

@@ -56,6 +56,7 @@ fn meta_schema() -> Value {
                         "app": { "type": "string" },
                         "event_names": { "type": "array", "items": { "type": "string" } },
                         "attribute_keys": { "type": "array", "items": { "type": "string" } },
+                        "numeric_attribute_keys": { "type": "array", "items": { "type": "string" } },
                         "first_event": { "type": "string", "description": "RFC3339; absent when the app has no events." },
                         "last_event": { "type": "string", "description": "RFC3339; absent when the app has no events." },
                         "total_events": { "type": "integer" }
@@ -114,6 +115,10 @@ mod tests {
                 "meta app schema missing `{key}`"
             );
         }
+        assert!(
+            app_props.contains_key("numeric_attribute_keys"),
+            "meta app schema missing `numeric_attribute_keys`"
+        );
     }
 
     #[test]
