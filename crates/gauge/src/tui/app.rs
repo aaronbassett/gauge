@@ -31,6 +31,8 @@ pub struct ExploreState {
     pub result: Option<QueryResponse>,
     /// Selected numeric attribute key (from get_meta), required by numeric measures/histogram.
     pub numeric_attr: Option<String>,
+    pub histogram_requested: bool,
+    pub histogram: Option<gauge_query::QueryResponse>,
 }
 
 pub struct App {
@@ -99,6 +101,11 @@ impl App {
                     (self.explore.dimension_idx + 1) % EXPLORE_DIMENSIONS.len()
             }
             KeyCode::Enter if self.page == Page::Explore => self.explore.run_requested = true,
+            KeyCode::Char('h')
+                if self.page == Page::Explore && self.explore.numeric_attr.is_some() =>
+            {
+                self.explore.histogram_requested = true;
+            }
             KeyCode::Char('n') if self.page == Page::Explore => {
                 let keys: Vec<String> = self
                     .snapshot

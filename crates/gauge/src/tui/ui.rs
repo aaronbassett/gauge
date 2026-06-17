@@ -272,9 +272,46 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
     .block(Block::default().borders(Borders::ALL).title("Explore"));
     f.render_widget(picker, chunks[0]);
 
+    if let Some(hist) = &app.explore.histogram {
+        let attr_alias = app
+            .explore
+            .numeric_attr
+            .as_ref()
+            .map(|k| format!("attr.{k}"))
+            .unwrap_or_default();
+        let bars: Vec<Bar> = hist
+            .rows
+            .iter()
+            .map(|r| {
+                Bar::default()
+                    .label(
+                        r[attr_alias.as_str()]
+                            .as_str()
+                            .unwrap_or("?")
+                            .to_string()
+                            .into(),
+                    )
+                    .value(r["count"].as_i64().unwrap_or(0) as u64)
+            })
+            .collect();
+        let chart = BarChart::default()
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Histogram (h to refresh)"),
+            )
+            .direction(Direction::Horizontal)
+            .bar_width(1)
+            .data(BarGroup::default().bars(&bars));
+        f.render_widget(chart, chunks[1]);
+        return;
+    }
     let block = Block::default().borders(Borders::ALL).title("Result");
     match &app.explore.result {
-        None => f.render_widget(Paragraph::new("press enter to run").block(block), chunks[1]),
+        None => f.render_widget(
+            Paragraph::new("press enter to run · n: pick attr · h: histogram").block(block),
+            chunks[1],
+        ),
         Some(resp) => {
             let lines: Vec<Line> = resp
                 .rows
