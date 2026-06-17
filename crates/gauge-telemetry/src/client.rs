@@ -182,6 +182,7 @@ pub struct Builder {
     grace: Option<Duration>,
     flush_args: Vec<String>,
     accel: Option<String>,
+    ci_override: Option<bool>,
 }
 
 impl Builder {
@@ -240,6 +241,14 @@ impl Builder {
         self.accel = Some(v.into());
         self
     }
+    /// Override CI auto-detection. By default the builder treats the process as
+    /// CI when the `CI` env var is set to a truthy value (which disables
+    /// telemetry). Pass `false` to force non-CI (used by tests that need an
+    /// enabled handle while themselves running under CI); `true` to force CI.
+    pub fn ci(mut self, is_ci: bool) -> Self {
+        self.ci_override = Some(is_ci);
+        self
+    }
 
     /// Resolve consent and build the handle. A disabled handle is returned when
     /// consent resolves to off. Returns `Err` only on a genuinely broken setup
@@ -257,13 +266,15 @@ impl Builder {
             .app_env_var
             .as_ref()
             .and_then(|n| std::env::var(n).ok());
-        let ci = std::env::var("CI").ok();
+        let is_ci = self
+            .ci_override
+            .unwrap_or_else(|| consent::is_ci(std::env::var("CI").ok().as_deref()));
         let inputs = ConsentInputs {
             global_disable: global.as_deref(),
             app_var: app_var.as_deref(),
             config_enabled: self.config_enabled,
             runtime_enabled: self.runtime_enabled,
-            is_ci: consent::is_ci(ci.as_deref()),
+            is_ci,
         };
         if !consent::resolve(&inputs) {
             return Ok(Telemetry(None));
@@ -330,6 +341,7 @@ mod tests {
             .install_id_path(tmp.join("id"))
             .config_enabled(true)
             .runtime_enabled(true)
+            .ci(false)
     }
 
     #[test]
@@ -370,6 +382,23 @@ mod tests {
     }
 
     #[test]
+    fn ci_detection_disables_via_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let t = Telemetry::builder()
+            .app("tome")
+            .app_version("0.7.0")
+            .endpoint("https://example.invalid")
+            .install_id_path(tmp.path().join("id"))
+            .config_enabled(true)
+            .runtime_enabled(true)
+            .ci(true)
+            .build()
+            .unwrap();
+        assert!(!t.is_enabled());
+        assert!(!tmp.path().join("id").exists()); // disabled => no FS work
+    }
+
+    #[test]
     fn insecure_endpoint_is_rejected_at_build() {
         let tmp = tempfile::tempdir().unwrap();
         let result = Telemetry::builder()
@@ -379,6 +408,7 @@ mod tests {
             .install_id_path(tmp.path().join("id"))
             .config_enabled(true)
             .runtime_enabled(true)
+            .ci(false)
             .build();
         // `Telemetry` is not `Debug`, so match rather than `unwrap_err`.
         match result {
@@ -410,6 +440,7 @@ mod tests {
             .install_id_path(tmp.path().join("id"))
             .config_enabled(true)
             .runtime_enabled(true)
+            .ci(false)
             .grace(std::time::Duration::ZERO) // skip grace so it flushes now
             .build()
             .unwrap();
@@ -454,6 +485,7 @@ mod tests {
             .install_id_path(tmp.path().join("id"))
             .config_enabled(true)
             .runtime_enabled(true)
+            .ci(false)
             .grace(std::time::Duration::ZERO)
             .build()
             .unwrap();

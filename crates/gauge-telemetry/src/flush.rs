@@ -143,6 +143,7 @@ mod tests {
             .install_id_path(tmp.path().join("id"))
             .config_enabled(true)
             .runtime_enabled(true)
+            .ci(false)
             .grace(Duration::ZERO)
             .build()
             .unwrap();
@@ -190,6 +191,7 @@ mod tests {
             .install_id_path(tmp.path().join("id"))
             .config_enabled(true)
             .runtime_enabled(true)
+            .ci(false)
             .grace(Duration::ZERO)
             .build()
             .unwrap();

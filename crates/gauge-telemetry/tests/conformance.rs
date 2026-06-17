@@ -19,6 +19,7 @@ fn emitted_events_pass_the_gauge_profile() {
         .install_id_path(tmp.path().join("id"))
         .config_enabled(true)
         .runtime_enabled(true)
+        .ci(false)
         .build()
         .unwrap();
 
