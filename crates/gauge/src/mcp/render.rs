@@ -308,7 +308,14 @@ pub fn project_query(resp: &Value, req: &QueryRequest) -> ToolOutcome {
     // No granularity + a relative range -> offer a day-bucketed trend over the same
     // period, carrying forward any app/event_name equality filter so the suggested
     // trend keeps the original scope.
-    if req.granularity.is_none()
+    // Only suggest this for plain count-style queries — not for aggregate/bucket queries.
+    let is_plain = req.measures.iter().all(|m| m.numeric_field().is_none())
+        && !req
+            .dimensions
+            .iter()
+            .any(|d| matches!(d, gauge_query::Dimension::Bucket { .. }));
+    if is_plain
+        && req.granularity.is_none()
         && let TimeRange::Last { last } = &req.time_range
     {
         let mut args = json!({ "period": last, "granularity": "day" });
@@ -708,5 +715,27 @@ mod tests {
         let o = project_meta(&resp);
         assert!(o.summary.contains("(none)"));
         assert!(o.next_actions.is_empty());
+    }
+
+    #[test]
+    fn project_query_skips_trend_for_aggregate() {
+        use gauge_query::{Field, Measure, QueryRequest, TimeRange};
+        let resp =
+            json!({ "rows": [ {"avg_latency_ms": 142.0} ], "truncated": false, "elapsed_ms": 5 });
+        let req = QueryRequest {
+            measures: vec![Measure::Avg(Field::Attr("latency_ms".into()))],
+            dimensions: vec![],
+            filters: vec![],
+            time_range: TimeRange::Last { last: "7d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        };
+        let o = project_query(&resp, &req);
+        assert!(
+            o.next_actions
+                .iter()
+                .all(|a| a.tool != Some("events_over_time"))
+        );
     }
 }

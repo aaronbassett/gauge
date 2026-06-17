@@ -49,7 +49,7 @@ impl GaugeMcp {
         }
     }
 
-    /// Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions. Dimensions: app, event_name, app_version, os, arch, attr.<key>. Time ranges: {"last":"7d"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and attribute keys.
+    /// Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions, plus numeric aggregates over a numeric attr.<key> as single-key objects — {"avg":"attr.latency_ms"}, min, max, p50, p90, p95, p99. Dimensions: app, event_name, app_version, os, arch, attr.<key>, and a numeric bucket {"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}} (rows carry the range label; meta.buckets echoes edges+labels). Filters: eq, neq, in, exists, and numeric gt, gte, lt, lte over a numeric attr.<key>. Non-numeric/null attribute values are excluded, never errored. Time ranges: {"last":"7d"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and numeric_attribute_keys.
     #[tool(annotations(
         title = "Query telemetry",
         read_only_hint = true,
