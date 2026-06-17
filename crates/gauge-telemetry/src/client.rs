@@ -81,6 +81,57 @@ impl Telemetry {
         let _ = rx.recv_timeout(timeout); // ignore result and timeout; best-effort
     }
 
+    /// The entrypoint an app routes its hidden flush subcommand to: drain once,
+    /// then return (the app exits). Runs in the foreground (this *is* the
+    /// detached child process).
+    pub fn run_flush(&self) {
+        if let Some(inner) = &self.0 {
+            let _ = gauge_events::sender::drain(&inner.cfg);
+        }
+    }
+
+    /// Spawn a detached child that runs the hidden flush subcommand, then return
+    /// immediately. The child survives this process's exit. No-op if disabled,
+    /// inside grace, or if `flush_args`/`current_exe` are unavailable.
+    pub fn spawn_detached_flush(&self) {
+        let Some(inner) = &self.0 else {
+            return;
+        };
+        if inner.flush_args.is_empty()
+            || consent::within_grace(inner.mint_time, inner.grace, SystemTime::now())
+        {
+            return;
+        }
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
+        let mut cmd = std::process::Command::new(exe);
+        cmd.args(&inner.flush_args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt as _;
+            // New session → detached from the controlling terminal, so the
+            // parent's exit/SIGHUP does not kill the flusher.
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                });
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt as _;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        }
+        let _ = cmd.spawn(); // drop the child handle; do not wait
+    }
+
     /// Regenerate the install UUID and clear the queue.
     pub fn reset(&self) -> std::io::Result<()> {
         let Some(inner) = &self.0 else {
@@ -304,5 +355,25 @@ mod tests {
         .unwrap();
 
         assert!(read_lines(&queue).unwrap().is_empty(), "queue drained after 2xx");
+    }
+
+    #[tokio::test]
+    async fn run_flush_drains_like_blocking() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/v1/logs"))
+            .respond_with(ResponseTemplate::new(200)).mount(&server).await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let t = Telemetry::builder().app("tome").app_version("0.7.0")
+            .endpoint(server.uri()).install_id_path(tmp.path().join("id"))
+            .config_enabled(true).runtime_enabled(true).grace(std::time::Duration::ZERO)
+            .build().unwrap();
+        t.emit(&CommandInvoked { command: "x".into(), duration_ms: 1, outcome: Outcome::Ok, surface: Surface::Cli });
+        let queue = tmp.path().join("id.queue.jsonl");
+
+        tokio::task::spawn_blocking(move || t.run_flush()).await.unwrap();
+        assert!(read_lines(&queue).unwrap().is_empty());
     }
 }

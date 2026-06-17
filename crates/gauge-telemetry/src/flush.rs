@@ -73,6 +73,26 @@ fn run_loop(
     }
 }
 
+/// Build the (program, args) the detached flusher will exec: the current
+/// binary re-invoked with the app-registered flush args. Pure for testing.
+pub fn detached_command_parts(current_exe: &std::path::Path, flush_args: &[String]) -> (String, Vec<String>) {
+    (current_exe.display().to_string(), flush_args.to_vec())
+}
+
+#[cfg(test)]
+mod detach_tests {
+    use super::*;
+
+    #[test]
+    fn command_parts_reexec_current_exe_with_flush_args() {
+        let exe = std::path::Path::new("/usr/local/bin/tome");
+        let args = vec!["telemetry".to_string(), "flush".to_string(), "--quiet".to_string()];
+        let (prog, got) = detached_command_parts(exe, &args);
+        assert_eq!(prog, "/usr/local/bin/tome");
+        assert_eq!(got, args);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
