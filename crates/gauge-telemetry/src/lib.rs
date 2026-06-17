@@ -14,6 +14,7 @@ pub mod flush;
 
 pub(crate) mod identity;
 
+pub use canary::{FORBIDDEN_SUBSTRINGS, assert_no_forbidden};
 pub use client::{BuildError, Builder, Telemetry};
 pub use flush::Flusher;
 
