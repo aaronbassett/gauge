@@ -114,6 +114,20 @@ mod tests {
     }
 
     #[test]
+    fn outcome_variants_serialize_snake_case() {
+        use serde_json::json;
+        assert_eq!(serde_json::to_value(Outcome::Ok).unwrap(), json!("ok"));
+        assert_eq!(
+            serde_json::to_value(Outcome::Failed).unwrap(),
+            json!("failed")
+        );
+        assert_eq!(
+            serde_json::to_value(Outcome::InvalidInput).unwrap(),
+            json!("invalid_input")
+        );
+    }
+
+    #[test]
     fn heartbeat_flattens_env_and_omits_missing() {
         let e = Heartbeat {
             env: EnvAttributes {

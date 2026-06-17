@@ -6,12 +6,12 @@
 //! attribute values are scalars only. See `SPEC.md` for the wire contract and
 //! `PORTING.md` for migrating an existing app.
 //!
-//! ```ignore
-//! use std::time::Duration;
+//! ```no_run
 //! use gauge_telemetry::Telemetry;
 //! use gauge_telemetry::client::DEFAULT_FLUSH_TIMEOUT;
 //! use gauge_telemetry::common::{CommandInvoked, Outcome, Surface};
 //!
+//! let install_id_path = std::path::PathBuf::from("/home/user/.tome/telemetry/id");
 //! let telemetry = Telemetry::builder()
 //!     .app("tome")
 //!     .app_version(env!("CARGO_PKG_VERSION"))
