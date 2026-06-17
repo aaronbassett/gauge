@@ -1,0 +1,5 @@
+---
+source: crates/gauge-server/src/sqlbuild.rs
+expression: "build(&req, NOW).unwrap().sql"
+---
+SELECT app AS "app", COUNT(*) AS "count", AVG(CASE WHEN jsonb_typeof(attributes->$3) = 'number' THEN (attributes->>$3)::double precision END) AS "avg_latency_ms", percentile_cont(0.95) WITHIN GROUP (ORDER BY CASE WHEN jsonb_typeof(attributes->$4) = 'number' THEN (attributes->>$4)::double precision END) AS "p95_latency_ms" FROM events WHERE time >= $1 AND time < $2 GROUP BY 1 LIMIT 1001

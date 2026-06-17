@@ -18,6 +18,8 @@ pub enum QueryError {
     BadFilter(String, String, &'static str),
     #[error("order field `{0}` is not in the selected output")]
     BadOrderField(String),
+    #[error("numeric operation on `{0}` requires an attr.<key> field")]
+    NumericFieldRequired(String),
 }
 
 pub fn parse_last(s: &str) -> Result<Duration, QueryError> {
@@ -65,6 +67,13 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
     if req.measures.is_empty() {
         return Err(QueryError::EmptyMeasures);
     }
+    for m in &req.measures {
+        if let Some(f) = m.numeric_field()
+            && !matches!(f, Field::Attr(_))
+        {
+            return Err(QueryError::NumericFieldRequired(f.to_string()));
+        }
+    }
     if let Some(l) = req.limit
         && l > MAX_LIMIT
     {
@@ -102,4 +111,30 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request::{Measure, QueryRequest};
+
+    fn req_with(measures: Vec<Measure>) -> QueryRequest {
+        QueryRequest {
+            measures,
+            dimensions: vec![],
+            filters: vec![],
+            time_range: crate::request::TimeRange::Last { last: "1d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_requires_attr_field() {
+        let ok = req_with(vec![Measure::Avg(Field::Attr("latency_ms".into()))]);
+        assert!(validate(&ok).is_ok());
+        let bad = req_with(vec![Measure::Avg(Field::Os)]);
+        assert!(matches!(validate(&bad), Err(QueryError::NumericFieldRequired(_))));
+    }
 }

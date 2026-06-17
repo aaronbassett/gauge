@@ -62,7 +62,7 @@ pub async fn query(
     for row in rows.iter().take(built.limit) {
         let mut obj = serde_json::Map::new();
         for col in &built.columns {
-            let v = match col.kind {
+            let v = match &col.kind {
                 ColKind::Text => row
                     .try_get::<Option<String>, _>(col.alias.as_str())
                     .map(|o| o.map(Value::String).unwrap_or(Value::Null)),
@@ -72,6 +72,9 @@ pub async fn query(
                 ColKind::TimeBucket => row
                     .try_get::<OffsetDateTime, _>(col.alias.as_str())
                     .map(|t| Value::String(t.format(&Rfc3339).unwrap_or_default())),
+                ColKind::Float => row
+                    .try_get::<Option<f64>, _>(col.alias.as_str())
+                    .map(sqlbuild::float_value),
             }
             .map_err(|_| {
                 ApiError::service_unavailable("row_decode", "failed to decode result row")

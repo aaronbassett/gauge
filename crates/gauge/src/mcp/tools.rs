@@ -74,18 +74,14 @@ pub fn top_events_query(p: &TopEventsParams) -> QueryRequest {
         TopBy::Count => Measure::Count,
         TopBy::UniqueInstalls => Measure::UniqueInstalls,
     };
+    let order_field = measure.alias();
     QueryRequest {
         measures: vec![measure],
         dimensions: vec![Field::EventName],
         filters: base_filters(&p.app, &None),
-        time_range: TimeRange::Last {
-            last: p.period.clone(),
-        },
+        time_range: TimeRange::Last { last: p.period.clone() },
         granularity: None,
-        order: vec![Order {
-            field: measure.alias().into(),
-            dir: Dir::Desc,
-        }],
+        order: vec![Order { field: order_field, dir: Dir::Desc }],
         limit: Some(p.limit.unwrap_or(10)),
     }
 }
