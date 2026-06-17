@@ -45,6 +45,7 @@ pub async fn query(
             Bind::Text(s) => q.bind(s),
             Bind::TextArr(v) => q.bind(v),
             Bind::Time(t) => q.bind(*t),
+            Bind::Float(f) => q.bind(*f),
         };
     }
     let rows = q.fetch_all(&mut *tx).await.map_err(|e| {

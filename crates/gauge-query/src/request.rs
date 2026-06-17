@@ -154,18 +154,14 @@ pub struct Filter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub enum FilterOp {
-    Eq,
-    Neq,
-    In,
-    Exists,
-}
+pub enum FilterOp { Eq, Neq, In, Exists, Gt, Gte, Lt, Lte }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum FilterValue {
     One(String),
     Many(Vec<String>),
+    Num(f64),
 }
 
 /// Relative ranges use "<N>h" or "<N>d" (max 365d). Absolute uses RFC3339.

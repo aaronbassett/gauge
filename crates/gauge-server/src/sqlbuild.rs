@@ -14,6 +14,7 @@ pub enum Bind {
     Text(String),
     TextArr(Vec<String>),
     Time(OffsetDateTime),
+    Float(f64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +160,26 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
                 let p = ph(&mut binds, Bind::Text(k.clone()));
                 wheres.push(format!("attributes ? {p}"));
             }
+            (FilterOp::Gt, Some(FilterValue::Num(v))) => {
+                let expr = numeric_field_expr(&f.field, &mut binds);
+                let p = ph(&mut binds, Bind::Float(*v));
+                wheres.push(format!("{expr} > {p}"));
+            }
+            (FilterOp::Gte, Some(FilterValue::Num(v))) => {
+                let expr = numeric_field_expr(&f.field, &mut binds);
+                let p = ph(&mut binds, Bind::Float(*v));
+                wheres.push(format!("{expr} >= {p}"));
+            }
+            (FilterOp::Lt, Some(FilterValue::Num(v))) => {
+                let expr = numeric_field_expr(&f.field, &mut binds);
+                let p = ph(&mut binds, Bind::Float(*v));
+                wheres.push(format!("{expr} < {p}"));
+            }
+            (FilterOp::Lte, Some(FilterValue::Num(v))) => {
+                let expr = numeric_field_expr(&f.field, &mut binds);
+                let p = ph(&mut binds, Bind::Float(*v));
+                wheres.push(format!("{expr} <= {p}"));
+            }
             _ => unreachable!("rejected by validate()"),
         }
     }
@@ -286,6 +307,19 @@ mod tests {
                 "dimensions":["app"],"time_range":{"last":"7d"}}"#,
         ).unwrap();
         insta::assert_snapshot!(build(&req, NOW).unwrap().sql);
+    }
+
+    #[test]
+    fn snapshot_numeric_filter() {
+        let req: QueryRequest = serde_json::from_str(
+            r#"{"measures":["count"],
+                "filters":[{"field":"attr.latency_ms","op":"gt","value":4242}],
+                "time_range":{"last":"7d"}}"#,
+        ).unwrap();
+        let built = build(&req, NOW).unwrap();
+        // the numeric filter value is bound, never spliced into SQL text
+        assert!(!built.sql.contains("4242"));
+        insta::assert_snapshot!(built.sql);
     }
 
     #[test]

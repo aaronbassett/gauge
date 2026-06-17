@@ -91,6 +91,16 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
                     return Err(QueryError::BadFilter(fname, opname, "an attr.<key> field"));
                 }
             }
+            (FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte, Some(FilterValue::Num(_))) => {
+                if !matches!(f.field, Field::Attr(_)) {
+                    return Err(QueryError::NumericFieldRequired(fname));
+                }
+            }
+            (FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte, _) => {
+                return Err(QueryError::BadFilter(
+                    fname, opname, "a numeric value on an attr.<key> field",
+                ));
+            }
             (FilterOp::Eq | FilterOp::Neq, _) => {
                 return Err(QueryError::BadFilter(
                     fname,
@@ -136,5 +146,24 @@ mod tests {
         assert!(validate(&ok).is_ok());
         let bad = req_with(vec![Measure::Avg(Field::Os)]);
         assert!(matches!(validate(&bad), Err(QueryError::NumericFieldRequired(_))));
+    }
+
+    #[test]
+    fn numeric_filter_requires_num_and_attr() {
+        use crate::request::{Filter, FilterOp, FilterValue};
+        let mut r = req_with(vec![Measure::Count]);
+        r.filters = vec![Filter {
+            field: Field::Attr("latency_ms".into()),
+            op: FilterOp::Gt,
+            value: Some(FilterValue::Num(500.0)),
+        }];
+        assert!(validate(&r).is_ok());
+        // gt on a non-attr field is rejected
+        r.filters[0].field = Field::Os;
+        assert!(matches!(validate(&r), Err(QueryError::NumericFieldRequired(_))));
+        // gt with a string value is rejected
+        r.filters[0].field = Field::Attr("latency_ms".into());
+        r.filters[0].value = Some(FilterValue::One("500".into()));
+        assert!(matches!(validate(&r), Err(QueryError::BadFilter(..))));
     }
 }
