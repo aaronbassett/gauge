@@ -3,8 +3,8 @@
 //! (filter values, attr keys) is a bind parameter — never string-spliced.
 
 use gauge_query::{
-    DEFAULT_LIMIT, Dir, Field, FilterOp, FilterValue, MAX_LIMIT, Measure, QueryError, QueryRequest,
-    resolve_time_range, validate,
+    BucketMeta, DEFAULT_LIMIT, Dimension, Dir, Field, FilterOp, FilterValue, MAX_LIMIT, Measure,
+    QueryError, QueryRequest, bucket_labels, resolve_time_range, validate,
 };
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -15,6 +15,7 @@ pub enum Bind {
     TextArr(Vec<String>),
     Time(OffsetDateTime),
     Float(f64),
+    FloatArr(Vec<f64>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +24,7 @@ pub enum ColKind {
     Int,
     TimeBucket,
     Float,
+    Bucket { labels: Vec<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +39,7 @@ pub struct BuiltQuery {
     pub binds: Vec<Bind>,
     pub columns: Vec<ColSpec>,
     pub limit: usize,
+    pub bucket_meta: Vec<BucketMeta>,
 }
 
 fn ph(binds: &mut Vec<Bind>, b: Bind) -> String {
@@ -86,6 +89,16 @@ pub fn float_value(v: Option<f64>) -> Value {
         .unwrap_or(Value::Null)
 }
 
+/// Decode a `width_bucket` index column to its human label.
+pub fn bucket_value(labels: &[String], idx: Option<i32>) -> Value {
+    match idx {
+        Some(i) if i >= 0 && (i as usize) < labels.len() => {
+            Value::String(labels[i as usize].clone())
+        }
+        _ => Value::Null,
+    }
+}
+
 pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, QueryError> {
     validate(req)?;
     let (from, to) = resolve_time_range(&req.time_range, now)?;
@@ -94,6 +107,7 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
     let mut select: Vec<String> = Vec::new();
     let mut columns: Vec<ColSpec> = Vec::new();
     let mut group_count = 0usize;
+    let mut bucket_meta: Vec<BucketMeta> = Vec::new();
 
     let p_from = ph(&mut binds, Bind::Time(from));
     let p_to = ph(&mut binds, Bind::Time(to));
@@ -111,15 +125,39 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
         group_count += 1;
     }
     for d in &req.dimensions {
-        // alias chars are restricted by Field::parse — safe inside quotes
-        let alias = d.to_string();
-        let expr = field_expr(d, &mut binds);
-        select.push(format!("{expr} AS \"{alias}\""));
-        columns.push(ColSpec {
-            alias,
-            kind: ColKind::Text,
-        });
-        group_count += 1;
+        match d {
+            Dimension::Field(f) => {
+                let alias = f.to_string();
+                let expr = field_expr(f, &mut binds);
+                select.push(format!("{expr} AS \"{alias}\""));
+                columns.push(ColSpec {
+                    alias,
+                    kind: ColKind::Text,
+                });
+                group_count += 1;
+            }
+            Dimension::Bucket { bucket } => {
+                let alias = bucket.field.to_string();
+                let inner = numeric_field_expr(&bucket.field, &mut binds); // key bound once
+                wheres.push(format!("{inner} IS NOT NULL")); // exclude non-numeric rows
+                let pe = ph(&mut binds, Bind::FloatArr(bucket.edges.clone()));
+                select.push(format!("width_bucket({inner}, {pe}) AS \"{alias}\""));
+                let labels = bucket_labels(&bucket.edges);
+                columns.push(ColSpec {
+                    alias: alias.clone(),
+                    kind: ColKind::Bucket {
+                        labels: labels.clone(),
+                    },
+                });
+                bucket_meta.push(BucketMeta {
+                    field: alias.clone(),
+                    alias,
+                    edges: bucket.edges.clone(),
+                    labels,
+                });
+                group_count += 1;
+            }
+        }
     }
     for m in &req.measures {
         let (expr, kind) = match m {
@@ -212,11 +250,14 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
 
     let aliases: Vec<&str> = columns.iter().map(|c| c.alias.as_str()).collect();
     let order_terms: Vec<String> = if req.order.is_empty() {
+        let mut terms = Vec::new();
         if req.granularity.is_some() {
-            vec!["\"time_bucket\" ASC".into()]
-        } else {
-            vec![]
+            terms.push("\"time_bucket\" ASC".to_string());
         }
+        for b in &bucket_meta {
+            terms.push(format!("\"{}\" ASC", b.alias)); // bucket alias = width_bucket index → numeric order
+        }
+        terms
     } else {
         req.order
             .iter()
@@ -243,6 +284,7 @@ pub fn build(req: &QueryRequest, now: OffsetDateTime) -> Result<BuiltQuery, Quer
         binds,
         columns,
         limit,
+        bucket_meta,
     })
 }
 
@@ -338,6 +380,29 @@ mod tests {
         // the numeric filter value is bound, never spliced into SQL text
         assert!(!built.sql.contains("4242"));
         insta::assert_snapshot!(built.sql);
+    }
+
+    #[test]
+    fn snapshot_numeric_bucket() {
+        let req: QueryRequest = serde_json::from_str(
+            r#"{"measures":["count","unique_installs"],
+                "dimensions":[{"bucket":{"field":"attr.latency_ms","edges":[137,911]}}],
+                "time_range":{"last":"7d"}}"#,
+        )
+        .unwrap();
+        let built = build(&req, NOW).unwrap();
+        assert!(!built.sql.contains("137") && !built.sql.contains("911")); // edges bound, not spliced
+        assert_eq!(built.bucket_meta.len(), 1);
+        assert_eq!(built.bucket_meta[0].labels, vec!["<137", "137-911", "911+"]);
+        insta::assert_snapshot!(built.sql);
+    }
+
+    #[test]
+    fn bucket_value_maps_index_to_label() {
+        let labels = vec!["<50".to_string(), "50-200".to_string(), "200+".to_string()];
+        assert_eq!(bucket_value(&labels, Some(1)), serde_json::json!("50-200"));
+        assert_eq!(bucket_value(&labels, None), serde_json::Value::Null);
+        assert_eq!(bucket_value(&labels, Some(9)), serde_json::Value::Null);
     }
 
     #[test]

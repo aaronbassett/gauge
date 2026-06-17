@@ -1,0 +1,5 @@
+---
+source: crates/gauge-server/src/sqlbuild.rs
+expression: built.sql
+---
+SELECT width_bucket(CASE WHEN jsonb_typeof(attributes->$3) = 'number' THEN (attributes->>$3)::double precision END, $4) AS "attr.latency_ms", COUNT(*) AS "count", COUNT(DISTINCT install_id) AS "unique_installs" FROM events WHERE time >= $1 AND time < $2 AND CASE WHEN jsonb_typeof(attributes->$3) = 'number' THEN (attributes->>$3)::double precision END IS NOT NULL GROUP BY 1 ORDER BY "attr.latency_ms" ASC LIMIT 1001

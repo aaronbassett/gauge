@@ -2,7 +2,9 @@ use thiserror::Error;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::field::Field;
-use crate::request::{FilterOp, FilterValue, MAX_LIMIT, QueryRequest, TimeRange};
+use crate::request::{
+    Dimension, FilterOp, FilterValue, MAX_BUCKET_EDGES, MAX_LIMIT, QueryRequest, TimeRange,
+};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum QueryError {
@@ -20,6 +22,35 @@ pub enum QueryError {
     BadOrderField(String),
     #[error("numeric operation on `{0}` requires an attr.<key> field")]
     NumericFieldRequired(String),
+    #[error(
+        "bucket edges on `{0}` must be non-empty, finite, strictly ascending, and at most {MAX_BUCKET_EDGES}"
+    )]
+    BadBucketEdges(String),
+    #[error("duplicate output `{0}` (two dimensions/measures resolve to the same column)")]
+    DuplicateOutput(String),
+}
+
+/// Human-readable bucket labels for `width_bucket` indices 0..=edges.len().
+/// e.g. `[50,200,500,1000]` → `["<50","50-200","200-500","500-1000","1000+"]`.
+pub fn bucket_labels(edges: &[f64]) -> Vec<String> {
+    fn fmt(x: f64) -> String {
+        if x.fract() == 0.0 && x.abs() < 1e15 {
+            format!("{}", x as i64)
+        } else {
+            format!("{x}")
+        }
+    }
+    let mut labels = Vec::with_capacity(edges.len() + 1);
+    if let Some(first) = edges.first() {
+        labels.push(format!("<{}", fmt(*first)));
+    }
+    for w in edges.windows(2) {
+        labels.push(format!("{}-{}", fmt(w[0]), fmt(w[1])));
+    }
+    if let Some(last) = edges.last() {
+        labels.push(format!("{}+", fmt(*last)));
+    }
+    labels
 }
 
 pub fn parse_last(s: &str) -> Result<Duration, QueryError> {
@@ -72,6 +103,31 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
             && !matches!(f, Field::Attr(_))
         {
             return Err(QueryError::NumericFieldRequired(f.to_string()));
+        }
+    }
+    use std::collections::HashSet;
+    let mut seen: HashSet<String> = HashSet::new();
+    for d in &req.dimensions {
+        if let Dimension::Bucket { bucket } = d {
+            if !matches!(bucket.field, Field::Attr(_)) {
+                return Err(QueryError::NumericFieldRequired(bucket.field.to_string()));
+            }
+            let e = &bucket.edges;
+            let ok = !e.is_empty()
+                && e.len() <= MAX_BUCKET_EDGES
+                && e.iter().all(|x| x.is_finite())
+                && e.windows(2).all(|w| w[0] < w[1]);
+            if !ok {
+                return Err(QueryError::BadBucketEdges(bucket.field.to_string()));
+            }
+        }
+        if !seen.insert(d.alias()) {
+            return Err(QueryError::DuplicateOutput(d.alias()));
+        }
+    }
+    for m in &req.measures {
+        if !seen.insert(m.alias()) {
+            return Err(QueryError::DuplicateOutput(m.alias()));
         }
     }
     if let Some(l) = req.limit
@@ -154,6 +210,43 @@ mod tests {
             validate(&bad),
             Err(QueryError::NumericFieldRequired(_))
         ));
+    }
+
+    #[test]
+    fn bucket_edges_must_be_sorted_and_attr() {
+        use crate::request::{BucketSpec, Dimension};
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![Dimension::Bucket {
+            bucket: BucketSpec {
+                field: Field::Attr("latency_ms".into()),
+                edges: vec![200.0, 50.0],
+            },
+        }];
+        assert!(matches!(validate(&r), Err(QueryError::BadBucketEdges(_))));
+        r.dimensions[0] = Dimension::Bucket {
+            bucket: BucketSpec {
+                field: Field::App,
+                edges: vec![50.0, 200.0],
+            },
+        };
+        assert!(matches!(
+            validate(&r),
+            Err(QueryError::NumericFieldRequired(_))
+        ));
+    }
+
+    #[test]
+    fn bucket_labels_span_edges() {
+        let labels = crate::validate::bucket_labels(&[50.0, 200.0, 500.0, 1000.0]);
+        assert_eq!(
+            labels,
+            vec!["<50", "50-200", "200-500", "500-1000", "1000+"]
+        );
+        // fractional edges keep their decimals
+        assert_eq!(
+            crate::validate::bucket_labels(&[1.5, 3.0]),
+            vec!["<1.5", "1.5-3", "3+"]
+        );
     }
 
     #[test]

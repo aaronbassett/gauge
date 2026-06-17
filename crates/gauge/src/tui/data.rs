@@ -1,4 +1,6 @@
-use gauge_query::{AppMeta, Dir, Field, Granularity, Measure, Order, QueryRequest, TimeRange};
+use gauge_query::{
+    AppMeta, Dimension, Dir, Field, Granularity, Measure, Order, QueryRequest, TimeRange,
+};
 use time::OffsetDateTime;
 
 use crate::api::ApiClient;
@@ -75,7 +77,7 @@ fn base(w: TimeWindow) -> QueryRequest {
 pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientError> {
     let timeseries = api
         .query(&QueryRequest {
-            dimensions: vec![Field::App],
+            dimensions: vec![Dimension::Field(Field::App)],
             granularity: Some(w.granularity()),
             ..base(w)
         })
@@ -88,7 +90,7 @@ pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientErr
                 Measure::UniqueInstalls,
                 Measure::UniqueSessions,
             ],
-            dimensions: vec![Field::App],
+            dimensions: vec![Dimension::Field(Field::App)],
             order: vec![Order {
                 field: "app".into(),
                 dir: Dir::Asc,
@@ -99,7 +101,7 @@ pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientErr
         .rows;
     let top_events = api
         .query(&QueryRequest {
-            dimensions: vec![Field::EventName],
+            dimensions: vec![Dimension::Field(Field::EventName)],
             order: vec![Order {
                 field: "count".into(),
                 dir: Dir::Desc,

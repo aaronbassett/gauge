@@ -14,7 +14,13 @@ fn parses_spec_example_request() {
     }"#;
     let req: QueryRequest = serde_json::from_str(json).unwrap();
     assert_eq!(req.measures, vec![Measure::UniqueInstalls]);
-    assert_eq!(req.dimensions, vec![Field::App, Field::EventName]);
+    assert_eq!(
+        req.dimensions,
+        vec![
+            Dimension::Field(Field::App),
+            Dimension::Field(Field::EventName)
+        ]
+    );
     assert_eq!(req.filters[1].field, Field::Attr("surface".into()));
     assert_eq!(req.granularity, Some(Granularity::Day));
     assert_eq!(req.limit, Some(100));

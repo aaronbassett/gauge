@@ -2,7 +2,8 @@
 //! Separated from rmcp glue so they unit-test without a server.
 
 use gauge_query::{
-    Dir, Field, Filter, FilterOp, FilterValue, Granularity, Measure, Order, QueryRequest, TimeRange,
+    Dimension, Dir, Field, Filter, FilterOp, FilterValue, Granularity, Measure, Order,
+    QueryRequest, TimeRange,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -77,7 +78,7 @@ pub fn top_events_query(p: &TopEventsParams) -> QueryRequest {
     let order_field = measure.alias();
     QueryRequest {
         measures: vec![measure],
-        dimensions: vec![Field::EventName],
+        dimensions: vec![Dimension::Field(Field::EventName)],
         filters: base_filters(&p.app, &None),
         time_range: TimeRange::Last {
             last: p.period.clone(),

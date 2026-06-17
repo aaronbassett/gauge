@@ -5,13 +5,14 @@ use crate::field::Field;
 
 pub const DEFAULT_LIMIT: u32 = 1_000;
 pub const MAX_LIMIT: u32 = 10_000;
+pub const MAX_BUCKET_EDGES: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryRequest {
     pub measures: Vec<Measure>,
     #[serde(default)]
-    pub dimensions: Vec<Field>,
+    pub dimensions: Vec<Dimension>,
     #[serde(default)]
     pub filters: Vec<Filter>,
     pub time_range: TimeRange,
@@ -160,6 +161,39 @@ impl schemars::JsonSchema for Measure {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum Dimension {
+    Field(Field),                  // "app", "attr.surface"
+    Bucket { bucket: BucketSpec }, // {"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}}
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BucketSpec {
+    pub field: Field,
+    pub edges: Vec<f64>,
+}
+
+impl Dimension {
+    pub fn field(&self) -> &Field {
+        match self {
+            Dimension::Field(f) => f,
+            Dimension::Bucket { bucket } => &bucket.field,
+        }
+    }
+    /// Output column alias (the field's display string).
+    pub fn alias(&self) -> String {
+        self.field().to_string()
+    }
+}
+
+impl From<Field> for Dimension {
+    fn from(f: Field) -> Self {
+        Dimension::Field(f)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Filter {
@@ -234,6 +268,25 @@ pub enum Dir {
 #[cfg(test)]
 mod tests {
     use super::Measure;
+
+    #[test]
+    fn dimension_serde_field_and_bucket() {
+        use crate::request::{Dimension, QueryRequest};
+        // a bare string is a Field dimension (backward compatible)
+        let f: Dimension = serde_json::from_value(serde_json::json!("app")).unwrap();
+        assert!(matches!(f, Dimension::Field(_)));
+        // an object is a bucket dimension
+        let b: Dimension = serde_json::from_value(
+            serde_json::json!({"bucket": {"field": "attr.latency_ms", "edges": [50, 200]}}),
+        )
+        .unwrap();
+        assert!(matches!(b, Dimension::Bucket { .. }));
+        // existing requests with string dimensions still parse
+        let _: QueryRequest = serde_json::from_str(
+            r#"{"measures":["count"],"dimensions":["app","event_name"],"time_range":{"last":"1d"}}"#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn measure_serde_simple_and_aggregate() {
