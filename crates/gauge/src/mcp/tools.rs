@@ -118,9 +118,14 @@ pub fn events_over_time_query(p: &EventsOverTimeParams) -> QueryRequest {
     }
 }
 
-/// A bare attr key (e.g. "latency_ms") → `Field::Attr`. Falls back to `attr.<key>` parsing.
-fn attr_field(key: &str) -> Field {
-    Field::parse(&format!("attr.{key}")).unwrap_or(Field::Attr(key.to_string()))
+/// A numeric attribute key — accepts a bare key ("latency_ms") or an
+/// "attr."-prefixed key ("attr.latency_ms") — resolved to `Field::Attr`.
+/// Errors if the key is empty or uses characters the DSL disallows.
+fn attr_field(key: &str) -> Result<Field, String> {
+    let bare = key.strip_prefix("attr.").unwrap_or(key);
+    Field::parse(&format!("attr.{bare}")).map_err(|_| {
+        format!("invalid attribute key `{key}` (allowed: letters, digits, '_', '.', max 64 chars)")
+    })
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -135,9 +140,9 @@ pub struct NumericStatsParams {
     pub event_name: Option<String>,
 }
 
-pub fn numeric_stats_query(p: &NumericStatsParams) -> QueryRequest {
-    let f = attr_field(&p.field);
-    QueryRequest {
+pub fn numeric_stats_query(p: &NumericStatsParams) -> Result<QueryRequest, String> {
+    let f = attr_field(&p.field)?;
+    Ok(QueryRequest {
         measures: vec![
             Measure::Avg(f.clone()),
             Measure::Min(f.clone()),
@@ -155,7 +160,7 @@ pub fn numeric_stats_query(p: &NumericStatsParams) -> QueryRequest {
         granularity: None,
         order: vec![],
         limit: None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -169,13 +174,41 @@ mod tests {
             field: "latency_ms".into(),
             app: Some("tome".into()),
             event_name: None,
-        });
+        })
+        .unwrap();
         // avg/min/max + four percentiles over attr.latency_ms
         assert_eq!(q.measures.len(), 7);
         assert!(
             q.measures
                 .iter()
                 .any(|m| matches!(m, Measure::P95(f) if f.to_string() == "attr.latency_ms"))
+        );
+        gauge_query::validate(&q).unwrap();
+    }
+
+    #[test]
+    fn numeric_stats_query_with_event_name_has_two_filters() {
+        let q = numeric_stats_query(&NumericStatsParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            app: Some("tome".into()),
+            event_name: Some("tome.search".into()),
+        })
+        .unwrap();
+        // Must include both an app filter and an event_name filter.
+        assert_eq!(
+            q.filters.len(),
+            2,
+            "expected 2 filters (app + event_name), got {}",
+            q.filters.len()
+        );
+        assert!(
+            q.filters.iter().any(|f| f.field == Field::App),
+            "missing app filter"
+        );
+        assert!(
+            q.filters.iter().any(|f| f.field == Field::EventName),
+            "missing event_name filter"
         );
         gauge_query::validate(&q).unwrap();
     }

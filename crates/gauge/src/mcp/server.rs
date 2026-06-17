@@ -144,7 +144,13 @@ impl GaugeMcp {
         &self,
         Parameters(p): Parameters<NumericStatsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let req = numeric_stats_query(&p);
+        let req = match numeric_stats_query(&p) {
+            Ok(r) => r,
+            Err(msg) => return Ok(ToolFailure::new(
+                ErrorKind::InvalidInput, msg,
+                "Pass a numeric attribute key from get_meta's numeric_attribute_keys (e.g. \"latency_ms\").",
+            ).into_result()),
+        };
         Ok(match self.query_to_value(&req).await {
             Ok(v) => project_numeric_stats(&v, &p).into_result(),
             Err(f) => f.into_result(),

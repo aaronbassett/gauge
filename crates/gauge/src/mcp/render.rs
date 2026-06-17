@@ -5,7 +5,9 @@
 //! `is_error: true` result carrying a shared error envelope.
 
 use crate::error::ClientError;
-use crate::mcp::tools::{EventsOverTimeParams, TopBy, TopEventsParams, UniqueUsersParams};
+use crate::mcp::tools::{
+    EventsOverTimeParams, NumericStatsParams, TopBy, TopEventsParams, UniqueUsersParams,
+};
 use gauge_query::{Field, FilterOp, FilterValue, QueryRequest, TimeRange};
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value, json};
@@ -430,10 +432,7 @@ pub fn project_top_events(resp: &Value, p: &TopEventsParams) -> ToolOutcome {
 }
 
 /// `numeric_stats` -> single-row `{ avg_*, min_*, max_*, p50_*..p99_* }`.
-pub fn project_numeric_stats(
-    resp: &Value,
-    p: &crate::mcp::tools::NumericStatsParams,
-) -> ToolOutcome {
+pub fn project_numeric_stats(resp: &Value, p: &NumericStatsParams) -> ToolOutcome {
     let row = rows_of(resp).first().cloned().unwrap_or_else(|| json!({}));
     let g = |k: &str| row.get(k).and_then(Value::as_f64);
     let key = &p.field;
@@ -451,14 +450,23 @@ pub fn project_numeric_stats(
         num(g(&format!("p95_{key}"))),
         num(g(&format!("max_{key}")))
     );
+    // default edges; the agent can override per field semantics
     let next_actions = vec![NextAction::call(
         format!("See the {key} distribution as a histogram"),
         "numeric_histogram",
-        match &p.app {
-            Some(a) => {
+        match (&p.app, &p.event_name) {
+            (Some(a), Some(e)) => {
+                json!({ "period": p.period, "field": key, "app": a, "event_name": e, "edges": [50, 200, 500, 1000] })
+            }
+            (Some(a), None) => {
                 json!({ "period": p.period, "field": key, "app": a, "edges": [50, 200, 500, 1000] })
             }
-            None => json!({ "period": p.period, "field": key, "edges": [50, 200, 500, 1000] }),
+            (None, Some(e)) => {
+                json!({ "period": p.period, "field": key, "event_name": e, "edges": [50, 200, 500, 1000] })
+            }
+            (None, None) => {
+                json!({ "period": p.period, "field": key, "edges": [50, 200, 500, 1000] })
+            }
         },
     )];
     ToolOutcome {
