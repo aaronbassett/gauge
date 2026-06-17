@@ -285,7 +285,7 @@ impl Builder {
         // until events are dropped. Placed after the consent early-return (so a
         // disabled handle stays a pure no-op) and before identity minting (so a
         // misconfigured enabled build never touches the filesystem).
-        if !gauge_events::sender::endpoint_allowed(&endpoint) {
+        if !gauge_events::sender::transport::endpoint_allowed(&endpoint) {
             return Err(BuildError::InsecureEndpoint(endpoint));
         }
 
