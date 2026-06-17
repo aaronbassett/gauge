@@ -5,6 +5,7 @@
 //! `is_error: true` result carrying a shared error envelope.
 
 use crate::error::ClientError;
+use gauge_query::{QueryRequest, TimeRange};
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value, json};
 
@@ -219,6 +220,116 @@ impl ToolFailure {
     }
 }
 
+/// Up to this many rows go in the text fence; the full set is always in structured_content.
+const FENCE_ROW_CAP: usize = 3;
+
+fn rows_of(resp: &Value) -> &[Value] {
+    resp.get("rows")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+/// `get_meta` -> MetaResponse `{ apps: [AppMeta..] }`.
+pub fn project_meta(resp: &Value) -> ToolOutcome {
+    let empty = vec![];
+    let apps = resp.get("apps").and_then(Value::as_array).unwrap_or(&empty);
+    let names: Vec<&str> = apps
+        .iter()
+        .filter_map(|a| a.get("app").and_then(Value::as_str))
+        .collect();
+    let total_events: i64 = apps
+        .iter()
+        .filter_map(|a| a.get("total_events").and_then(Value::as_i64))
+        .sum();
+    let event_name_count: usize = apps
+        .iter()
+        .filter_map(|a| a.get("event_names").and_then(Value::as_array).map(Vec::len))
+        .sum();
+    let summary = format!(
+        "Apps: {}. {} event names, {} events total.",
+        if names.is_empty() {
+            "(none)".to_owned()
+        } else {
+            names.join(", ")
+        },
+        event_name_count,
+        total_events,
+    );
+    let mut next_actions = Vec::new();
+    if let Some(top_app) = names.first() {
+        next_actions.push(NextAction::call(
+            format!("See the most-used events for {top_app} (last 30 days)"),
+            "top_events",
+            json!({ "period": "30d", "app": top_app }),
+        ));
+        // A ready, valid query example using a real app + (if any) a real event name.
+        let event = apps
+            .first()
+            .and_then(|a| a.get("event_names"))
+            .and_then(Value::as_array)
+            .and_then(|e| e.first())
+            .and_then(Value::as_str);
+        let mut args = json!({ "period": "7d", "app": top_app });
+        if let Some(ev) = event {
+            args["event_name"] = json!(ev);
+        }
+        next_actions.push(NextAction::call(
+            "Count unique users for a concrete app/event in the last 7 days",
+            "unique_users",
+            args,
+        ));
+    }
+    let trimmed = json!({
+        "apps": names,
+        "event_name_count": event_name_count,
+        "total_events": total_events,
+    });
+    ToolOutcome {
+        summary,
+        trimmed,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
+/// Generic query result `{ rows, truncated, elapsed_ms }` for `query_telemetry`.
+pub fn project_query(resp: &Value, req: &QueryRequest) -> ToolOutcome {
+    let rows = rows_of(resp);
+    let truncated = resp
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let elapsed = resp.get("elapsed_ms").and_then(Value::as_u64).unwrap_or(0);
+    let summary = format!("{} rows, {elapsed}ms (truncated: {truncated}).", rows.len());
+    let mut next_actions = vec![NextAction::call(
+        "Discover queryable apps, event names, and attribute keys",
+        "get_meta",
+        json!({}),
+    )];
+    // No granularity + a relative range -> offer a day-bucketed trend over the same period.
+    if req.granularity.is_none()
+        && let TimeRange::Last { last } = &req.time_range
+    {
+        next_actions.push(NextAction::call(
+            "View this as a day-by-day trend over the same period",
+            "events_over_time",
+            json!({ "period": last, "granularity": "day" }),
+        ));
+    }
+    let trimmed = json!({
+        "rows": rows.iter().take(FENCE_ROW_CAP).cloned().collect::<Vec<_>>(),
+        "row_count": rows.len(),
+        "truncated": truncated,
+    });
+    ToolOutcome {
+        summary,
+        trimmed,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +392,52 @@ mod tests {
             assert_eq!(sc["error"]["code"], json!(code));
             assert_eq!(sc["error"]["retryable"], json!(retryable));
         }
+    }
+
+    use gauge_query::{QueryRequest, TimeRange};
+
+    #[test]
+    fn project_meta_summarizes_and_suggests_drill() {
+        let resp = json!({
+            "apps": [
+                { "app": "tome", "event_names": ["tome.search", "tome.open"], "attribute_keys": ["lang"], "total_events": 1200, "first_event": "2026-05-01T00:00:00Z", "last_event": "2026-06-01T00:00:00Z" },
+                { "app": "midnight-manual", "event_names": ["mm.search"], "attribute_keys": [], "total_events": 50, "first_event": null, "last_event": null }
+            ]
+        });
+        let o = project_meta(&resp);
+        assert!(o.summary.contains("tome"));
+        assert!(o.summary.contains("midnight-manual"));
+        // a drill action carries a real app name
+        let drill = o
+            .next_actions
+            .iter()
+            .find(|a| a.tool == Some("top_events"))
+            .unwrap();
+        assert_eq!(drill.arguments.as_ref().unwrap()["app"], json!("tome"));
+    }
+
+    #[test]
+    fn project_query_reports_rowcount_and_trend_action() {
+        let resp =
+            json!({ "rows": [ {"count": 5}, {"count": 3} ], "truncated": false, "elapsed_ms": 11 });
+        let req = QueryRequest {
+            measures: vec![gauge_query::Measure::Count],
+            dimensions: vec![],
+            filters: vec![],
+            time_range: TimeRange::Last { last: "7d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        };
+        let o = project_query(&resp, &req);
+        assert!(o.summary.contains("2 rows"));
+        // no granularity + Last range → an events_over_time trend action with the same period
+        let trend = o
+            .next_actions
+            .iter()
+            .find(|a| a.tool == Some("events_over_time"))
+            .unwrap();
+        assert_eq!(trend.arguments.as_ref().unwrap()["period"], json!("7d"));
     }
 
     #[test]
