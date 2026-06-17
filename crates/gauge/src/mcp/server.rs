@@ -172,3 +172,53 @@ pub async fn serve(api: Arc<ApiClient>) -> Result<(), Box<dyn std::error::Error>
     service.waiting().await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_list_has_annotations_and_output_schemas() {
+        let mut tools = GaugeMcp::tool_router().list_all();
+        apply_output_schemas(&mut tools);
+
+        assert_eq!(tools.len(), 5, "expected 5 MCP tools, got {}", tools.len());
+
+        // Every tool is annotated read-only.
+        for t in &tools {
+            let ann = t
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} missing annotations", t.name));
+            assert_eq!(
+                ann.read_only_hint,
+                Some(true),
+                "{} should be read-only",
+                t.name
+            );
+        }
+
+        // Every tool advertises an output schema with described properties (not an
+        // empty passthrough).
+        for name in [
+            "query_telemetry",
+            "get_meta",
+            "unique_users",
+            "top_events",
+            "events_over_time",
+        ] {
+            let t = tools
+                .iter()
+                .find(|t| t.name.as_ref() == name)
+                .unwrap_or_else(|| panic!("missing tool {name}"));
+            let schema = t
+                .output_schema
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name} missing output_schema"));
+            assert!(
+                schema.get("properties").is_some(),
+                "{name} output_schema has no properties"
+            );
+        }
+    }
+}
