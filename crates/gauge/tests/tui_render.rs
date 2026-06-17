@@ -20,6 +20,7 @@ fn synthetic_snapshot() -> Snapshot {
             app: "tome".into(),
             event_names: vec!["tome.search".into()],
             attribute_keys: vec!["surface".into()],
+            numeric_attribute_keys: vec![],
             first_event: None,
             last_event: None,
             total_events: 14,

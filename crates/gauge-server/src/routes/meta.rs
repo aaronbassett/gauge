@@ -36,6 +36,14 @@ pub async fn meta(
     .fetch_all(&st.pool)
     .await
     .map_err(db_err)?;
+    let numeric_keys = sqlx::query(
+        "SELECT DISTINCT app, e.key AS key \
+         FROM events, jsonb_each(attributes) AS e(key, value) \
+         WHERE jsonb_typeof(e.value) = 'number' ORDER BY 1, 2",
+    )
+    .fetch_all(&st.pool)
+    .await
+    .map_err(db_err)?;
 
     let mut apps: BTreeMap<String, AppMeta> = BTreeMap::new();
     for row in &stats {
@@ -47,6 +55,7 @@ pub async fn meta(
                 app,
                 event_names: vec![],
                 attribute_keys: vec![],
+                numeric_attribute_keys: vec![],
                 first_event: fmt(row.get("first")),
                 last_event: fmt(row.get("last")),
                 total_events: row.get("total"),
@@ -63,6 +72,12 @@ pub async fn meta(
         let app: String = row.get("app");
         if let Some(m) = apps.get_mut(&app) {
             m.attribute_keys.push(row.get("key"));
+        }
+    }
+    for row in &numeric_keys {
+        let app: String = row.get("app");
+        if let Some(m) = apps.get_mut(&app) {
+            m.numeric_attribute_keys.push(row.get("key"));
         }
     }
     Ok(Json(MetaResponse {
