@@ -59,6 +59,24 @@ impl Telemetry {
         let _ = enqueue(&inner.cfg, &full, attrs); // best-effort, non-fatal
     }
 
+    /// Best-effort synchronous flush, capped by `timeout` of wall-clock. Runs
+    /// the blocking drain on a worker thread so it is safe to call from async
+    /// contexts via `spawn_blocking`. No-op while inside the first-run grace.
+    pub fn flush_blocking(&self, timeout: Duration) {
+        let Some(inner) = &self.0 else {
+            return;
+        };
+        if consent::within_grace(inner.mint_time, inner.grace, SystemTime::now()) {
+            return;
+        }
+        let cfg = inner.cfg.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(gauge_events::sender::drain(&cfg));
+        });
+        let _ = rx.recv_timeout(timeout); // ignore result and timeout; best-effort
+    }
+
     /// Regenerate the install UUID and clear the queue.
     pub fn reset(&self) -> std::io::Result<()> {
         let Some(inner) = &self.0 else {
@@ -240,5 +258,47 @@ mod tests {
             surface: Surface::Cli,
         });
         assert!(!tmp.path().join("id").exists(), "disabled never even mints an install id");
+    }
+
+    #[tokio::test]
+    async fn flush_blocking_drains_queue_to_server() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/logs"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let t = Telemetry::builder()
+            .app("tome")
+            .app_version("0.7.0")
+            .endpoint(server.uri()) // http://127.0.0.1:PORT — allowed by transport
+            .install_id_path(tmp.path().join("id"))
+            .config_enabled(true)
+            .runtime_enabled(true)
+            .grace(std::time::Duration::ZERO) // skip grace so it flushes now
+            .build()
+            .unwrap();
+
+        t.emit(&CommandInvoked {
+            command: "search".into(),
+            duration_ms: 5,
+            outcome: Outcome::Ok,
+            surface: Surface::Cli,
+        });
+        let queue = tmp.path().join("id.queue.jsonl");
+        assert_eq!(read_lines(&queue).unwrap().len(), 1);
+
+        tokio::task::spawn_blocking(move || {
+            t.flush_blocking(std::time::Duration::from_secs(5));
+        })
+        .await
+        .unwrap();
+
+        assert!(read_lines(&queue).unwrap().is_empty(), "queue drained after 2xx");
     }
 }
