@@ -436,7 +436,9 @@ pub fn project_top_events(resp: &Value, p: &TopEventsParams) -> ToolOutcome {
 pub fn project_numeric_stats(resp: &Value, p: &NumericStatsParams) -> ToolOutcome {
     let row = rows_of(resp).first().cloned().unwrap_or_else(|| json!({}));
     let g = |k: &str| row.get(k).and_then(Value::as_f64);
-    let key = &p.field;
+    // Normalize away any "attr." prefix: the server's aggregate aliases are always
+    // <agg>_<bare_key> (e.g. "avg_latency_ms"), not "avg_attr.latency_ms".
+    let key = p.field.strip_prefix("attr.").unwrap_or(&p.field);
     let num = |o: Option<f64>| o.map(|v| format!("{v:.0}")).unwrap_or_else(|| "n/a".into());
     let scope = match (&p.app, &p.event_name) {
         (Some(a), Some(e)) => format!("{a} · {e}"),
@@ -938,6 +940,48 @@ mod tests {
                 .iter()
                 .any(|a| a.tool == Some("numeric_stats")),
             "expected a numeric_stats next action"
+        );
+    }
+
+    /// Regression: when the agent passes `field: "attr.latency_ms"` the projector must
+    /// strip the "attr." prefix before building the aggregate column keys.  Without the
+    /// fix the lookup keys would be "avg_attr.latency_ms" etc., which never match the
+    /// server-returned "avg_latency_ms", causing the summary to print "n/a" for every
+    /// stat.
+    #[test]
+    fn project_numeric_stats_handles_prefixed_field() {
+        // Server always returns bare-key aggregate aliases regardless of how the
+        // caller spelled the field.
+        let resp = json!({
+            "rows": [{
+                "avg_latency_ms": 142.0,
+                "p95_latency_ms": 480.0,
+                "max_latency_ms": 1200.0
+            }],
+            "truncated": false,
+            "elapsed_ms": 9
+        });
+        let p = NumericStatsParams {
+            period: "7d".into(),
+            field: "attr.latency_ms".into(), // prefixed — the bug trigger
+            app: None,
+            event_name: None,
+        };
+        let o = project_numeric_stats(&resp, &p);
+        assert!(
+            o.summary.contains("142"),
+            "summary should contain avg 142, got: {}",
+            o.summary
+        );
+        assert!(
+            o.summary.contains("480"),
+            "summary should contain p95 480, got: {}",
+            o.summary
+        );
+        assert!(
+            !o.summary.contains("n/a"),
+            "summary must not contain 'n/a' when stats are present, got: {}",
+            o.summary
         );
     }
 
