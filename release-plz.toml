@@ -48,7 +48,7 @@ commit_parsers = [
 
 # ---------------------------------------------------------------------------
 # `gauge` (the client) is the PRIMARY package: it owns the single workspace tag
-# and the single workspace changelog. All five crates share one version via the
+# and the single workspace changelog. All six crates share one version via the
 # `version_group`, so one tag describes the whole release.
 # ---------------------------------------------------------------------------
 [[package]]
@@ -61,9 +61,9 @@ git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = false
 # One workspace-level changelog at the repo root, aggregating every crate's
-# commits (the four other crates set `changelog_update = false` below).
+# commits (the five other crates set `changelog_update = false` below).
 changelog_path = "CHANGELOG.md"
-changelog_include = ["gauge-auth", "gauge-events", "gauge-query", "gauge-server"]
+changelog_include = ["gauge-auth", "gauge-events", "gauge-query", "gauge-server", "gauge-telemetry"]
 
 [[package]]
 name = "gauge-server"
@@ -82,5 +82,10 @@ changelog_update = false
 
 [[package]]
 name = "gauge-query"
+version_group = "gauge"
+changelog_update = false
+
+[[package]]
+name = "gauge-telemetry"
 version_group = "gauge"
 changelog_update = false
