@@ -28,9 +28,11 @@ fn base_filters(app: &Option<String>, event_name: &Option<String>) -> Vec<Filter
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UniqueUsersParams {
-    /// Relative period like "24h", "7d", "30d"
+    /// Relative look-back window, e.g. "24h", "7d", "30d".
     pub period: String,
+    /// Restrict to one app (a value from get_meta's `apps[].app`). Omit for all apps.
     pub app: Option<String>,
+    /// Restrict to one event name (from get_meta's `apps[].event_names`). Omit for all events.
     pub event_name: Option<String>,
 }
 
@@ -57,10 +59,13 @@ pub enum TopBy {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TopEventsParams {
+    /// Relative look-back window, e.g. "24h", "7d", "30d".
     pub period: String,
+    /// Restrict to one app (a value from get_meta's `apps[].app`). Omit for all apps.
     pub app: Option<String>,
-    /// Rank by total count (default) or by unique installs
+    /// Rank by total count (default) or by unique installs.
     pub by: Option<TopBy>,
+    /// Max number of events to return (default 10).
     pub limit: Option<u32>,
 }
 
@@ -87,9 +92,13 @@ pub fn top_events_query(p: &TopEventsParams) -> QueryRequest {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct EventsOverTimeParams {
+    /// Relative look-back window, e.g. "24h", "7d", "30d".
     pub period: String,
+    /// Time-bucket size for the series: hour, day, or week.
     pub granularity: Granularity,
+    /// Restrict to one app (a value from get_meta's `apps[].app`). Omit for all apps.
     pub app: Option<String>,
+    /// Restrict to one event name (from get_meta's `apps[].event_names`). Omit for all events.
     pub event_name: Option<String>,
 }
 
