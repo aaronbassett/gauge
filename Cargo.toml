@@ -6,6 +6,7 @@ members = [
     "crates/gauge-query",
     "crates/gauge-server",
     "crates/gauge",
+    "crates/gauge-telemetry",
 ]
 
 [workspace.package]
