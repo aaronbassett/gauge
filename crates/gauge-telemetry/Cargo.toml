@@ -1,0 +1,31 @@
+[package]
+name = "gauge-telemetry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Privacy-first telemetry client kernel for Gauge: typed events, identity, consent, and a crash-safe sender."
+keywords = ["telemetry", "otlp", "analytics", "privacy"]
+categories = ["development-tools"]
+readme = "SPEC.md"
+
+[dependencies]
+gauge-events = { workspace = true, features = ["sender"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
+thiserror = { workspace = true }
+sysinfo = "0.33"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+wiremock = { workspace = true }
+tokio = { workspace = true }
+insta = { workspace = true }
