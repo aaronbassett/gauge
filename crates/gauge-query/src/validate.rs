@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use thiserror::Error;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
@@ -105,7 +107,6 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
             return Err(QueryError::NumericFieldRequired(f.to_string()));
         }
     }
-    use std::collections::HashSet;
     let mut seen: HashSet<String> = HashSet::new();
     for d in &req.dimensions {
         if let Dimension::Bucket { bucket } = d {
@@ -247,6 +248,52 @@ mod tests {
             crate::validate::bucket_labels(&[1.5, 3.0]),
             vec!["<1.5", "1.5-3", "3+"]
         );
+    }
+
+    #[test]
+    fn duplicate_output_rejected() {
+        use crate::request::{BucketSpec, Dimension};
+
+        // Case 1: two Dimension::Field entries with the same field (e.g. two Field::App).
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![Dimension::Field(Field::App), Dimension::Field(Field::App)];
+        assert!(matches!(validate(&r), Err(QueryError::DuplicateOutput(_))));
+
+        // Case 2: Dimension::Field and Dimension::Bucket on the same attr field — both
+        // produce alias "attr.latency_ms" because Dimension::alias() delegates to
+        // field().to_string() for both variants.
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![
+            Dimension::Field(Field::Attr("latency_ms".into())),
+            Dimension::Bucket {
+                bucket: BucketSpec {
+                    field: Field::Attr("latency_ms".into()),
+                    edges: vec![50.0, 200.0],
+                },
+            },
+        ];
+        assert!(matches!(validate(&r), Err(QueryError::DuplicateOutput(_))));
+
+        // Case 3: dimension-vs-measure alias collision.
+        // A genuine collision is not constructible: dimension aliases are the field's
+        // display string ("app", "attr.x"), while aggregate measure aliases are
+        // "{fn}_{key}" (e.g. "avg_latency_ms") and fixed-name measures are "count" /
+        // "unique_installs" / "unique_sessions" — none of which match any Field display
+        // string.  The guard's dim-vs-measure branch is therefore unreachable in
+        // practice; the real protection comes from cases 1 and 2 (dup dimensions).
+        // We confirm the guard still fires for a second bucket-vs-field collision on a
+        // different attr to keep regression coverage broad.
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![
+            Dimension::Field(Field::Attr("duration_ms".into())),
+            Dimension::Bucket {
+                bucket: BucketSpec {
+                    field: Field::Attr("duration_ms".into()),
+                    edges: vec![100.0, 500.0],
+                },
+            },
+        ];
+        assert!(matches!(validate(&r), Err(QueryError::DuplicateOutput(_))));
     }
 
     #[test]
