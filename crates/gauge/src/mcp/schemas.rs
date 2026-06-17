@@ -71,9 +71,8 @@ fn meta_schema() -> Value {
 fn schema_for(name: &str) -> Option<Value> {
     match name {
         "get_meta" => Some(meta_schema()),
-        "query_telemetry" | "unique_users" | "top_events" | "events_over_time" => {
-            Some(query_envelope_schema())
-        }
+        "query_telemetry" | "unique_users" | "top_events" | "events_over_time"
+        | "numeric_stats" | "numeric_histogram" => Some(query_envelope_schema()),
         _ => None,
     }
 }

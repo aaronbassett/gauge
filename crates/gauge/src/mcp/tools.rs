@@ -118,9 +118,67 @@ pub fn events_over_time_query(p: &EventsOverTimeParams) -> QueryRequest {
     }
 }
 
+/// A bare attr key (e.g. "latency_ms") → `Field::Attr`. Falls back to `attr.<key>` parsing.
+fn attr_field(key: &str) -> Field {
+    Field::parse(&format!("attr.{key}")).unwrap_or(Field::Attr(key.to_string()))
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NumericStatsParams {
+    /// Relative look-back window, e.g. "24h", "7d", "30d".
+    pub period: String,
+    /// Numeric attribute key (from get_meta's `apps[].numeric_attribute_keys`), e.g. "latency_ms".
+    pub field: String,
+    /// Restrict to one app. Omit for all apps.
+    pub app: Option<String>,
+    /// Restrict to one event name. Omit for all events.
+    pub event_name: Option<String>,
+}
+
+pub fn numeric_stats_query(p: &NumericStatsParams) -> QueryRequest {
+    let f = attr_field(&p.field);
+    QueryRequest {
+        measures: vec![
+            Measure::Avg(f.clone()),
+            Measure::Min(f.clone()),
+            Measure::Max(f.clone()),
+            Measure::P50(f.clone()),
+            Measure::P90(f.clone()),
+            Measure::P95(f.clone()),
+            Measure::P99(f),
+        ],
+        dimensions: vec![],
+        filters: base_filters(&p.app, &p.event_name),
+        time_range: TimeRange::Last {
+            last: p.period.clone(),
+        },
+        granularity: None,
+        order: vec![],
+        limit: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_stats_builds_all_aggregates() {
+        let q = numeric_stats_query(&NumericStatsParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            app: Some("tome".into()),
+            event_name: None,
+        });
+        // avg/min/max + four percentiles over attr.latency_ms
+        assert_eq!(q.measures.len(), 7);
+        assert!(
+            q.measures
+                .iter()
+                .any(|m| matches!(m, Measure::P95(f) if f.to_string() == "attr.latency_ms"))
+        );
+        gauge_query::validate(&q).unwrap();
+    }
 
     #[test]
     fn unique_users_builds_expected_query() {

@@ -13,13 +13,13 @@ use serde_json::{Value, json};
 
 use crate::api::ApiClient;
 use crate::mcp::render::{
-    ErrorKind, NextAction, ToolFailure, project_events_over_time, project_meta, project_query,
-    project_top_events, project_unique_users,
+    ErrorKind, NextAction, ToolFailure, project_events_over_time, project_meta,
+    project_numeric_stats, project_query, project_top_events, project_unique_users,
 };
 use crate::mcp::schemas::apply_output_schemas;
 use crate::mcp::tools::{
-    EventsOverTimeParams, TopEventsParams, UniqueUsersParams, events_over_time_query,
-    top_events_query, unique_users_query,
+    EventsOverTimeParams, NumericStatsParams, TopEventsParams, UniqueUsersParams,
+    events_over_time_query, numeric_stats_query, top_events_query, unique_users_query,
 };
 
 #[derive(Clone)]
@@ -133,6 +133,23 @@ impl GaugeMcp {
             Err(f) => f.into_result(),
         })
     }
+
+    /// Summary statistics (avg/min/max and p50/p90/p95/p99) for a numeric attribute over a period. Field is a numeric attr key from get_meta's numeric_attribute_keys (e.g. "latency_ms").
+    #[tool(annotations(
+        title = "Numeric stats",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
+    pub async fn numeric_stats(
+        &self,
+        Parameters(p): Parameters<NumericStatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = numeric_stats_query(&p);
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_numeric_stats(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
+    }
 }
 
 impl ServerHandler for GaugeMcp {
@@ -182,7 +199,7 @@ mod tests {
         let mut tools = GaugeMcp::tool_router().list_all();
         apply_output_schemas(&mut tools);
 
-        assert_eq!(tools.len(), 5, "expected 5 MCP tools, got {}", tools.len());
+        assert_eq!(tools.len(), 6, "expected 6 MCP tools, got {}", tools.len());
 
         // Every tool is annotated read-only.
         for t in &tools {
@@ -206,6 +223,7 @@ mod tests {
             "unique_users",
             "top_events",
             "events_over_time",
+            "numeric_stats",
         ] {
             let t = tools
                 .iter()

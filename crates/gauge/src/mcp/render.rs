@@ -429,6 +429,46 @@ pub fn project_top_events(resp: &Value, p: &TopEventsParams) -> ToolOutcome {
     }
 }
 
+/// `numeric_stats` -> single-row `{ avg_*, min_*, max_*, p50_*..p99_* }`.
+pub fn project_numeric_stats(
+    resp: &Value,
+    p: &crate::mcp::tools::NumericStatsParams,
+) -> ToolOutcome {
+    let row = rows_of(resp).first().cloned().unwrap_or_else(|| json!({}));
+    let g = |k: &str| row.get(k).and_then(Value::as_f64);
+    let key = &p.field;
+    let num = |o: Option<f64>| o.map(|v| format!("{v:.0}")).unwrap_or_else(|| "n/a".into());
+    let scope = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => format!("{a} · {e}"),
+        (Some(a), None) => a.clone(),
+        (None, Some(e)) => e.clone(),
+        (None, None) => "all apps".to_owned(),
+    };
+    let summary = format!(
+        "{key} ({scope}, {}): avg {}, p95 {}, max {}.",
+        p.period,
+        num(g(&format!("avg_{key}"))),
+        num(g(&format!("p95_{key}"))),
+        num(g(&format!("max_{key}")))
+    );
+    let next_actions = vec![NextAction::call(
+        format!("See the {key} distribution as a histogram"),
+        "numeric_histogram",
+        match &p.app {
+            Some(a) => {
+                json!({ "period": p.period, "field": key, "app": a, "edges": [50, 200, 500, 1000] })
+            }
+            None => json!({ "period": p.period, "field": key, "edges": [50, 200, 500, 1000] }),
+        },
+    )];
+    ToolOutcome {
+        summary,
+        trimmed: row,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
 /// `events_over_time` -> rows `{ time_bucket, count }`.
 pub fn project_events_over_time(resp: &Value, p: &EventsOverTimeParams) -> ToolOutcome {
     let rows = rows_of(resp);
