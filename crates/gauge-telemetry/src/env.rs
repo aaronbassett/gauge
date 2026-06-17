@@ -46,20 +46,36 @@ pub fn host_arch() -> String {
 /// libc is a compile-time property on Linux; `None` off Linux.
 fn libc() -> Option<String> {
     if cfg!(target_os = "linux") {
-        Some(if cfg!(target_env = "musl") { "musl" } else { "glibc" }.to_string())
+        Some(
+            if cfg!(target_env = "musl") {
+                "musl"
+            } else {
+                "glibc"
+            }
+            .to_string(),
+        )
     } else {
         None
     }
 }
 
-/// Language subtag only, e.g. `en_US.UTF-8` → `en`. Pure for testability.
+/// Language subtag only, e.g. `en_US.UTF-8` → `en`. Strips any `@modifier`
+/// and treats the `C`/`POSIX`/`C.UTF-8` no-locale values as absent. Pure for
+/// testability.
 pub fn language_from(lang: Option<&str>) -> Option<String> {
     let raw = lang?.trim();
-    if raw.is_empty() || raw == "C" || raw == "POSIX" {
+    if raw.is_empty() {
         return None;
     }
-    let subtag = raw.split(['_', '.', '-']).next().unwrap_or(raw);
-    (!subtag.is_empty()).then(|| subtag.to_ascii_lowercase())
+    let subtag = raw
+        .split(['_', '.', '-', '@'])
+        .next()
+        .unwrap_or(raw)
+        .to_ascii_lowercase();
+    if subtag.is_empty() || subtag == "c" || subtag == "posix" {
+        return None;
+    }
+    Some(subtag)
 }
 
 /// Map a `$SHELL` path to a closed enum string. Pure for testability.
@@ -73,7 +89,7 @@ pub fn shell_from(shell_path: Option<&str>) -> Option<String> {
             "bash" => "bash",
             "zsh" => "zsh",
             "fish" => "fish",
-            "pwsh" | "powershell" => "pwsh",
+            "pwsh" | "powershell" | "pwsh.exe" | "powershell.exe" => "pwsh",
             "cmd" | "cmd.exe" => "cmd",
             _ => "other",
         }
@@ -86,7 +102,9 @@ pub fn shell_from(shell_path: Option<&str>) -> Option<String> {
 pub fn detect(accel: Option<String>) -> EnvAttributes {
     EnvAttributes {
         os_version: os_version(),
-        cpu_cores: std::thread::available_parallelism().ok().map(|n| n.get() as u32),
+        cpu_cores: std::thread::available_parallelism()
+            .ok()
+            .map(|n| n.get() as u32),
         ram_gb: ram_gb(),
         accel,
         libc: libc(),
@@ -97,11 +115,14 @@ pub fn detect(accel: Option<String>) -> EnvAttributes {
 
 /// `<id>:<major>` e.g. `darwin:14`, `ubuntu:22`, `windows:11`. Best-effort.
 fn os_version() -> Option<String> {
-    // sysinfo associated fns; verify exact names against the resolved 0.33 API.
     // Lowercase defensively so the macos→darwin remap can't be missed by a
     // mixed-case id from a future sysinfo version.
     let id = sysinfo::System::distribution_id().to_lowercase();
-    let id = if id == "macos" { "darwin".to_string() } else { id };
+    let id = if id == "macos" {
+        "darwin".to_string()
+    } else {
+        id
+    };
     let ver = sysinfo::System::os_version()?; // e.g. "14.5", "22.04", "11"
     let major = ver.split(['.', ' ']).next().filter(|s| !s.is_empty())?;
     Some(format!("{id}:{major}"))
@@ -134,14 +155,29 @@ mod tests {
         assert_eq!(language_from(Some("de_DE")).as_deref(), Some("de"));
         assert_eq!(language_from(Some("C")), None);
         assert_eq!(language_from(None), None);
+        // `@modifier` stripped; C/POSIX/C.UTF-8 treated as no-locale.
+        assert_eq!(language_from(Some("C.UTF-8")), None);
+        assert_eq!(language_from(Some("en@piglatin")).as_deref(), Some("en"));
+        assert_eq!(language_from(Some("POSIX")), None);
+        assert_eq!(language_from(Some("c")), None);
     }
 
     #[test]
     fn shell_maps_to_enum() {
         assert_eq!(shell_from(Some("/bin/zsh")).as_deref(), Some("zsh"));
         assert_eq!(shell_from(Some("/usr/bin/fish")).as_deref(), Some("fish"));
-        assert_eq!(shell_from(Some("/opt/weird/tcsh")).as_deref(), Some("other"));
+        assert_eq!(
+            shell_from(Some("/opt/weird/tcsh")).as_deref(),
+            Some("other")
+        );
         assert_eq!(shell_from(None), None);
+        // A `pwsh.exe` filename classifies as pwsh. Use forward slashes so the
+        // filename is extracted identically on every host (`Path::file_name`
+        // does not split on `\` off Windows, which is where this test runs).
+        assert_eq!(
+            shell_from(Some("C:/Program Files/PowerShell/7/pwsh.exe")).as_deref(),
+            Some("pwsh")
+        );
     }
 
     #[test]

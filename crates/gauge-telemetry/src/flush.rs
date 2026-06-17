@@ -19,7 +19,11 @@ pub struct Flusher {
 impl Flusher {
     /// Start a background flusher. Returns `None` if telemetry is disabled.
     /// Drains every `interval`, or sooner if the queue reaches or exceeds
-    /// `threshold_bytes`. `interval` is rounded up to the ~100ms tick granularity.
+    /// `threshold_bytes`. The size trigger fires once on crossing the threshold
+    /// (the rising edge), not continuously while over it; `threshold_bytes == 0`
+    /// disables the size trigger entirely (interval-only). `interval` is rounded
+    /// up to the ~100ms tick granularity, which is the effective minimum drain
+    /// cadence.
     pub fn start(t: &Telemetry, interval: Duration, threshold_bytes: u64) -> Option<Flusher> {
         let inner = t.inner()?;
         let cfg = inner.cfg.clone();
@@ -30,7 +34,10 @@ impl Flusher {
         let handle = std::thread::spawn(move || {
             run_loop(&cfg, interval, threshold_bytes, grace, mint, &stop2);
         });
-        Some(Flusher { stop, handle: Some(handle) })
+        Some(Flusher {
+            stop,
+            handle: Some(handle),
+        })
     }
 }
 
@@ -45,6 +52,13 @@ impl Drop for Flusher {
     }
 }
 
+/// The background drain loop for [`Flusher`]. Wakes every ~100ms — the
+/// effective minimum drain cadence — to react to stop and to the queue size
+/// threshold without waiting the full interval. The size trigger is
+/// edge-triggered: it fires only on the rising edge (crossing the threshold),
+/// not continuously while over it, so a small/zero threshold against a
+/// non-draining queue (e.g. a down server) cannot hot-drain every tick.
+/// `threshold_bytes == 0` disables the size trigger entirely.
 fn run_loop(
     cfg: &SenderConfig,
     interval: Duration,
@@ -53,18 +67,19 @@ fn run_loop(
     mint: Option<SystemTime>,
     stop: &AtomicBool,
 ) {
-    // Wake every 100ms to react to stop and to the queue size threshold
-    // without waiting the full interval. 100ms is a floor: a sub-100ms
-    // `interval` rounds up to this tick granularity rather than busy-spinning.
     let tick = Duration::from_millis(100);
     let mut waited = Duration::ZERO;
+    let mut was_over = false;
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(tick);
         waited += tick;
-        let over_threshold = std::fs::metadata(&cfg.queue_path)
-            .map(|m| m.len() >= threshold_bytes)
-            .unwrap_or(false);
-        if waited >= interval || over_threshold {
+        let over = threshold_bytes > 0
+            && std::fs::metadata(&cfg.queue_path)
+                .map(|m| m.len() >= threshold_bytes)
+                .unwrap_or(false);
+        let crossed = over && !was_over; // rising edge only
+        was_over = over;
+        if waited >= interval || crossed {
             waited = Duration::ZERO;
             if !within_grace(mint, grace, SystemTime::now()) {
                 let _ = drain(cfg);
@@ -73,9 +88,14 @@ fn run_loop(
     }
 }
 
-/// Build the (program, args) the detached flusher will exec: the current
-/// binary re-invoked with the app-registered flush args. Pure for testing.
-pub fn detached_command_parts(current_exe: &std::path::Path, flush_args: &[String]) -> (String, Vec<String>) {
+/// Build the (program, args) the DETACHED at-exit flush
+/// ([`crate::client::Telemetry::spawn_detached_flush`]) will exec: the current
+/// binary re-invoked with the app-registered flush args. This is NOT used by
+/// the background [`Flusher`], which drains in-process. Pure for testing.
+pub fn detached_command_parts(
+    current_exe: &std::path::Path,
+    flush_args: &[String],
+) -> (String, Vec<String>) {
     (current_exe.display().to_string(), flush_args.to_vec())
 }
 
@@ -86,7 +106,11 @@ mod detach_tests {
     #[test]
     fn command_parts_reexec_current_exe_with_flush_args() {
         let exe = std::path::Path::new("/usr/local/bin/tome");
-        let args = vec!["telemetry".to_string(), "flush".to_string(), "--quiet".to_string()];
+        let args = vec![
+            "telemetry".to_string(),
+            "flush".to_string(),
+            "--quiet".to_string(),
+        ];
         let (prog, got) = detached_command_parts(exe, &args);
         assert_eq!(prog, "/usr/local/bin/tome");
         assert_eq!(got, args);
@@ -144,5 +168,47 @@ mod tests {
         }
         drop(flusher);
         assert!(drained, "background flusher should drain the queue");
+    }
+
+    #[tokio::test]
+    async fn interval_only_does_not_hot_drain() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/logs"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let t = Telemetry::builder()
+            .app("mnm")
+            .app_version("0.1.0")
+            .endpoint(server.uri())
+            .install_id_path(tmp.path().join("id"))
+            .config_enabled(true)
+            .runtime_enabled(true)
+            .grace(Duration::ZERO)
+            .build()
+            .unwrap();
+        t.emit(&CommandInvoked {
+            command: "search".into(),
+            duration_ms: 1,
+            outcome: Outcome::Ok,
+            surface: Surface::Mcp,
+        });
+
+        let queue = tmp.path().join("id.queue.jsonl");
+        // Huge interval + threshold 0 (size trigger disabled): nothing should
+        // drain within a few ticks.
+        let flusher = Flusher::start(&t, Duration::from_secs(3600), 0).unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(
+            !read_lines(&queue).unwrap().is_empty(),
+            "queue must not drain: interval not elapsed and threshold disabled"
+        );
+        drop(flusher);
     }
 }

@@ -116,7 +116,11 @@ mod tests {
     #[test]
     fn heartbeat_flattens_env_and_omits_missing() {
         let e = Heartbeat {
-            env: EnvAttributes { cpu_cores: Some(8), accel: Some("metal".into()), ..Default::default() },
+            env: EnvAttributes {
+                cpu_cores: Some(8),
+                accel: Some("metal".into()),
+                ..Default::default()
+            },
         };
         let a = to_attributes(&e).unwrap();
         assert_eq!(a["cpu_cores"], Value::Number(8u32.into()));

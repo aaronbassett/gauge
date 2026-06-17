@@ -16,6 +16,9 @@ use crate::identity;
 /// Default first-run grace period before the first flush.
 pub const DEFAULT_GRACE: Duration = Duration::from_secs(600); // 10 minutes
 
+/// A sane default for the [`Telemetry::flush_blocking`] timeout.
+pub const DEFAULT_FLUSH_TIMEOUT: Duration = Duration::from_secs(3);
+
 pub(crate) struct Inner {
     pub cfg: SenderConfig,
     pub grace: Duration,
@@ -29,6 +32,7 @@ pub(crate) struct Inner {
 pub struct Telemetry(pub(crate) Option<Inner>);
 
 impl Telemetry {
+    /// Start configuring a [`Telemetry`] handle.
     pub fn builder() -> Builder {
         Builder::default()
     }
@@ -59,13 +63,20 @@ impl Telemetry {
                 return;
             }
         };
-        let full = format!("{}.{}", inner.cfg.app, event.name());
+        let name = event.name();
+        if !crate::event::is_valid_event_name(&name) {
+            debug_assert!(false, "telemetry event name `{name}` is invalid");
+            return;
+        }
+        let full = format!("{}.{}", inner.cfg.app, name);
         let _ = enqueue(&inner.cfg, &full, attrs); // best-effort, non-fatal
     }
 
     /// Best-effort synchronous flush, capped by `timeout` of wall-clock. Runs
     /// the blocking drain on a worker thread so it is safe to call from async
     /// contexts via `spawn_blocking`. No-op while inside the first-run grace.
+    ///
+    /// An alternative to (not in addition to) the background [`Flusher`](crate::Flusher).
     pub fn flush_blocking(&self, timeout: Duration) {
         let Some(inner) = &self.0 else {
             return;
@@ -84,6 +95,10 @@ impl Telemetry {
     /// The entrypoint an app routes its hidden flush subcommand to: drain once,
     /// then return (the app exits). Runs in the foreground (this *is* the
     /// detached child process).
+    ///
+    /// Load-bearing invariant: the app's flush subcommand MUST dispatch to
+    /// `run_flush()` and exit before any normal startup path runs — otherwise a
+    /// detached flush child can re-enter the app's main flow.
     pub fn run_flush(&self) {
         if let Some(inner) = &self.0 {
             let _ = gauge_events::sender::drain(&inner.cfg);
@@ -93,10 +108,19 @@ impl Telemetry {
     /// Spawn a detached child that runs the hidden flush subcommand, then return
     /// immediately. The child survives this process's exit. No-op if disabled,
     /// inside grace, or if `flush_args`/`current_exe` are unavailable.
+    ///
+    /// Load-bearing invariant: the app's flush subcommand MUST dispatch to
+    /// `run_flush()` and exit before any normal startup path runs. Intended for
+    /// processes that exit promptly after calling this; long-running processes
+    /// should use [`Flusher`](crate::Flusher) instead.
     pub fn spawn_detached_flush(&self) {
         let Some(inner) = &self.0 else {
             return;
         };
+        // Never let a flush child spawn its own flush child.
+        if std::env::var_os("GAUGE_TELEMETRY_FLUSH_CHILD").is_some() {
+            return;
+        }
         if inner.flush_args.is_empty()
             || consent::within_grace(inner.mint_time, inner.grace, SystemTime::now())
         {
@@ -107,6 +131,7 @@ impl Telemetry {
         };
         let mut cmd = std::process::Command::new(exe);
         cmd.args(&inner.flush_args)
+            .env("GAUGE_TELEMETRY_FLUSH_CHILD", "1")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
@@ -117,6 +142,7 @@ impl Telemetry {
             // parent's exit/SIGHUP does not kill the flusher.
             unsafe {
                 cmd.pre_exec(|| {
+                    // setsid failure is non-fatal; the child still flushes
                     libc::setsid();
                     Ok(())
                 });
@@ -159,18 +185,22 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// App name, used as the `<app>.` event-name prefix (required).
     pub fn app(mut self, v: impl Into<String>) -> Self {
         self.app = Some(v.into());
         self
     }
+    /// App version, reported as a resource attribute (required).
     pub fn app_version(mut self, v: impl Into<String>) -> Self {
         self.app_version = Some(v.into());
         self
     }
+    /// OTLP collector base URL; must be https or loopback (required).
     pub fn endpoint(mut self, v: impl Into<String>) -> Self {
         self.endpoint = Some(v.into());
         self
     }
+    /// Path to the persisted install-id file (required).
     pub fn install_id_path(mut self, p: impl Into<PathBuf>) -> Self {
         self.install_id_path = Some(p.into());
         self
@@ -195,6 +225,7 @@ impl Builder {
         self.runtime_enabled = v;
         self
     }
+    /// First-run grace period before the first flush (defaults to [`DEFAULT_GRACE`]).
     pub fn grace(mut self, g: Duration) -> Self {
         self.grace = Some(g);
         self
@@ -217,10 +248,15 @@ impl Builder {
         let app = self.app.ok_or(BuildError::Missing("app"))?;
         let app_version = self.app_version.ok_or(BuildError::Missing("app_version"))?;
         let endpoint = self.endpoint.ok_or(BuildError::Missing("endpoint"))?;
-        let install_id_path = self.install_id_path.ok_or(BuildError::Missing("install_id_path"))?;
+        let install_id_path = self
+            .install_id_path
+            .ok_or(BuildError::Missing("install_id_path"))?;
 
         let global = std::env::var(GLOBAL_DISABLE_VAR).ok();
-        let app_var = self.app_env_var.as_ref().and_then(|n| std::env::var(n).ok());
+        let app_var = self
+            .app_env_var
+            .as_ref()
+            .and_then(|n| std::env::var(n).ok());
         let ci = std::env::var("CI").ok();
         let inputs = ConsentInputs {
             global_disable: global.as_deref(),
@@ -231,6 +267,15 @@ impl Builder {
         };
         if !consent::resolve(&inputs) {
             return Ok(Telemetry(None));
+        }
+
+        // Fail fast on a misconfigured endpoint: a non-https/non-loopback URL
+        // would pass build() but silently fail every drain, filling the queue
+        // until events are dropped. Placed after the consent early-return (so a
+        // disabled handle stays a pure no-op) and before identity minting (so a
+        // misconfigured enabled build never touches the filesystem).
+        if !gauge_events::sender::endpoint_allowed(&endpoint) {
+            return Err(BuildError::InsecureEndpoint(endpoint));
         }
 
         let install_id = identity::load_or_create(&install_id_path)
@@ -265,6 +310,8 @@ impl Builder {
 pub enum BuildError {
     #[error("required telemetry config field missing: {0}")]
     Missing(&'static str),
+    #[error("telemetry endpoint must be https or loopback: {0}")]
+    InsecureEndpoint(String),
     #[error("telemetry identity io error: {0}")]
     Io(String),
 }
@@ -298,7 +345,11 @@ mod tests {
         });
         let lines = read_lines(&tmp.path().join("id.queue.jsonl")).unwrap();
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].contains("\"tome.command_invoked\""), "{}", lines[0]);
+        assert!(
+            lines[0].contains("\"tome.command_invoked\""),
+            "{}",
+            lines[0]
+        );
     }
 
     #[test]
@@ -312,7 +363,31 @@ mod tests {
             outcome: Outcome::Ok,
             surface: Surface::Cli,
         });
-        assert!(!tmp.path().join("id").exists(), "disabled never even mints an install id");
+        assert!(
+            !tmp.path().join("id").exists(),
+            "disabled never even mints an install id"
+        );
+    }
+
+    #[test]
+    fn insecure_endpoint_is_rejected_at_build() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = Telemetry::builder()
+            .app("tome")
+            .app_version("0.7.0")
+            .endpoint("http://telemetry.internal") // plain http, non-loopback
+            .install_id_path(tmp.path().join("id"))
+            .config_enabled(true)
+            .runtime_enabled(true)
+            .build();
+        // `Telemetry` is not `Debug`, so match rather than `unwrap_err`.
+        match result {
+            Err(BuildError::InsecureEndpoint(_)) => {}
+            Err(other) => panic!("expected InsecureEndpoint, got {other:?}"),
+            Ok(_) => panic!("expected InsecureEndpoint, got Ok"),
+        }
+        // The enabled-but-misconfigured build must not have minted an id.
+        assert!(!tmp.path().join("id").exists());
     }
 
     #[tokio::test]
@@ -354,7 +429,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(read_lines(&queue).unwrap().is_empty(), "queue drained after 2xx");
+        assert!(
+            read_lines(&queue).unwrap().is_empty(),
+            "queue drained after 2xx"
+        );
     }
 
     #[tokio::test]
@@ -362,18 +440,34 @@ mod tests {
         use wiremock::matchers::{method, path};
         use wiremock::{Mock, MockServer, ResponseTemplate};
         let server = MockServer::start().await;
-        Mock::given(method("POST")).and(path("/v1/logs"))
-            .respond_with(ResponseTemplate::new(200)).mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/logs"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
 
         let tmp = tempfile::tempdir().unwrap();
-        let t = Telemetry::builder().app("tome").app_version("0.7.0")
-            .endpoint(server.uri()).install_id_path(tmp.path().join("id"))
-            .config_enabled(true).runtime_enabled(true).grace(std::time::Duration::ZERO)
-            .build().unwrap();
-        t.emit(&CommandInvoked { command: "x".into(), duration_ms: 1, outcome: Outcome::Ok, surface: Surface::Cli });
+        let t = Telemetry::builder()
+            .app("tome")
+            .app_version("0.7.0")
+            .endpoint(server.uri())
+            .install_id_path(tmp.path().join("id"))
+            .config_enabled(true)
+            .runtime_enabled(true)
+            .grace(std::time::Duration::ZERO)
+            .build()
+            .unwrap();
+        t.emit(&CommandInvoked {
+            command: "x".into(),
+            duration_ms: 1,
+            outcome: Outcome::Ok,
+            surface: Surface::Cli,
+        });
         let queue = tmp.path().join("id.queue.jsonl");
 
-        tokio::task::spawn_blocking(move || t.run_flush()).await.unwrap();
+        tokio::task::spawn_blocking(move || t.run_flush())
+            .await
+            .unwrap();
         assert!(read_lines(&queue).unwrap().is_empty());
     }
 }

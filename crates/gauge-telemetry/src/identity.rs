@@ -29,7 +29,13 @@ pub fn load_or_create(path: &Path) -> io::Result<Uuid> {
             file.write_all(id.to_string().as_bytes())?;
             Ok(id)
         }
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => read(path),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => match read(path) {
+            Ok(id) => Ok(id),
+            // Corrupt/partial file (e.g. crash mid-write): regenerate rather
+            // than wedge `build()` forever.
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => reset(path),
+            Err(e) => Err(e),
+        },
         Err(e) => Err(e),
     }
 }
@@ -74,6 +80,19 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_file_self_heals() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("id");
+        std::fs::write(&p, "not-a-uuid").unwrap();
+        let healed = load_or_create(&p).unwrap();
+        // File now holds the regenerated, parseable UUID.
+        let on_disk = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(Uuid::parse_str(on_disk.trim()).unwrap(), healed);
+        // And it is stable on the next load.
+        assert_eq!(healed, load_or_create(&p).unwrap());
+    }
+
+    #[test]
     fn reset_changes_the_uuid() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("id");
@@ -90,6 +109,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("id");
         load_or_create(&p).unwrap();
-        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }

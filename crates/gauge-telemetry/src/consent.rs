@@ -54,10 +54,10 @@ pub fn is_ci(ci_var: Option<&str>) -> bool {
 }
 
 fn is_falsey_or_unset(v: Option<&str>) -> bool {
-    match v.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        None | Some("" | "0" | "false" | "off" | "no") => true,
-        _ => false,
-    }
+    matches!(
+        v.map(|s| s.trim().to_ascii_lowercase()).as_deref(),
+        None | Some("" | "0" | "false" | "off" | "no")
+    )
 }
 
 /// True while still inside the first-run grace window (flush should wait).
@@ -76,7 +76,11 @@ mod tests {
     use super::*;
 
     fn base() -> ConsentInputs<'static> {
-        ConsentInputs { config_enabled: true, runtime_enabled: true, ..Default::default() }
+        ConsentInputs {
+            config_enabled: true,
+            runtime_enabled: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -86,27 +90,41 @@ mod tests {
 
     #[test]
     fn global_kill_switch_overrides_app_opt_in() {
-        let i = ConsentInputs { global_disable: Some("1"), app_var: Some("1"), ..base() };
+        let i = ConsentInputs {
+            global_disable: Some("1"),
+            app_var: Some("1"),
+            ..base()
+        };
         assert!(!resolve(&i));
     }
 
     #[test]
     fn global_zero_does_not_force_enable() {
-        let i = ConsentInputs { global_disable: Some("0"), app_var: Some("0"), ..base() };
+        let i = ConsentInputs {
+            global_disable: Some("0"),
+            app_var: Some("0"),
+            ..base()
+        };
         assert!(!resolve(&i));
     }
 
     #[test]
     fn app_falsey_disables() {
         for v in ["0", "false", "OFF", "No"] {
-            let i = ConsentInputs { app_var: Some(v), ..base() };
+            let i = ConsentInputs {
+                app_var: Some(v),
+                ..base()
+            };
             assert!(!resolve(&i), "{v} should disable");
         }
     }
 
     #[test]
     fn ci_disables() {
-        assert!(!resolve(&ConsentInputs { is_ci: true, ..base() }));
+        assert!(!resolve(&ConsentInputs {
+            is_ci: true,
+            ..base()
+        }));
         assert!(is_ci(Some("true")));
         assert!(!is_ci(Some("0")));
         assert!(!is_ci(None));
