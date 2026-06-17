@@ -14,5 +14,7 @@ pub mod flush;
 
 pub(crate) mod identity;
 
+pub use client::{BuildError, Builder, Telemetry};
+
 /// Crate version, stamped at build time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
