@@ -144,7 +144,7 @@ Rules:
 | `ClientError` variant | `ErrorKind` | code | retryable | next_action |
 |---|---|---|---|---|
 | `Auth` / `KeyMissing` / `KeyExists` / `ConfigMissing` / `ConfigInvalid` / `NoConfigDir` | `Unauthenticated` | `UNAUTHENTICATED` | false | user: "run `gauge login`" (or the variant's existing remediation) |
-| `Api { status: 400, .. }` and pre-flight validation failures | `InvalidInput` | `INVALID_INPUT` | true | guidance names the field; `get_meta` to discover valid apps/events |
+| `Api { status: 400, .. }` and pre-flight validation failures | `InvalidInput` | `INVALID_INPUT` | false | guidance names the field; `get_meta` to discover valid apps/events. (`false`: an identical retry of a malformed request can't succeed — the caller must change the arguments. Recovery rides on the next_action.) |
 | `Api { status: 404, .. }` | `NotFound` | `NOT_FOUND` | false | `get_meta` |
 | `Api { status: 401 \| 403, .. }` | `Unauthenticated` | `UNAUTHENTICATED` | false | user: re-auth |
 | `Api { status: 429, .. }` | `RateLimited` | `RATE_LIMITED` | true | retry after the limit resets |
