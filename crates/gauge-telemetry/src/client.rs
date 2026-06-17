@@ -33,6 +33,10 @@ impl Telemetry {
         Builder::default()
     }
 
+    pub(crate) fn inner(&self) -> Option<&Inner> {
+        self.0.as_ref()
+    }
+
     /// True if telemetry is enabled (consent on). A disabled handle no-ops.
     pub fn is_enabled(&self) -> bool {
         self.0.is_some()
