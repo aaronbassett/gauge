@@ -1,12 +1,22 @@
 use std::sync::Arc;
 
 use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::tool::ToolCallContext;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, ServerCapabilities, ServerInfo};
-use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams,
+    ServerCapabilities, ServerInfo,
+};
+use rmcp::service::{RequestContext, RoleServer};
+use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt, tool, tool_router};
+use serde_json::{Value, json};
 
 use crate::api::ApiClient;
-use crate::error::ClientError;
+use crate::mcp::render::{
+    ErrorKind, NextAction, ToolFailure, project_events_over_time, project_meta, project_query,
+    project_top_events, project_unique_users,
+};
+use crate::mcp::schemas::apply_output_schemas;
 use crate::mcp::tools::{
     EventsOverTimeParams, TopEventsParams, UniqueUsersParams, events_over_time_query,
     top_events_query, unique_users_query,
@@ -18,15 +28,16 @@ pub struct GaugeMcp {
     tool_router: ToolRouter<Self>,
 }
 
-fn to_mcp_err(e: ClientError) -> McpError {
-    // ClientError Display already carries remediation ("run `gauge login`" etc.)
-    McpError::internal_error(e.to_string(), None)
-}
-
-fn ok_json<T: serde::Serialize>(v: &T) -> Result<CallToolResult, McpError> {
-    let json = serde_json::to_string_pretty(v)
-        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-    Ok(CallToolResult::success(vec![Content::text(json)]))
+impl GaugeMcp {
+    /// Run a query and convert the typed response into a JSON `Value` for the
+    /// projectors, mapping any client error into a `ToolFailure`.
+    async fn query_to_value(&self, req: &gauge_query::QueryRequest) -> Result<Value, ToolFailure> {
+        self.api
+            .query(req)
+            .await
+            .map(|r| serde_json::to_value(&r).unwrap_or_default())
+            .map_err(ToolFailure::from_client_error)
+    }
 }
 
 #[tool_router]
@@ -38,71 +49,92 @@ impl GaugeMcp {
         }
     }
 
-    #[tool(
-        description = "Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions. Dimensions: app, event_name, app_version, os, arch, attr.<key>. Time ranges: {\"last\":\"7d\"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and attribute keys."
-    )]
+    /// Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions. Dimensions: app, event_name, app_version, os, arch, attr.<key>. Time ranges: {"last":"7d"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and attribute keys.
+    #[tool(annotations(
+        title = "Query telemetry",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
     pub async fn query_telemetry(
         &self,
         Parameters(req): Parameters<gauge_query::QueryRequest>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(&self.api.query(&req).await.map_err(to_mcp_err)?)
+        if let Err(e) = gauge_query::validate(&req) {
+            return Ok(ToolFailure::new(
+                ErrorKind::InvalidInput,
+                e.to_string(),
+                "The query failed validation; fix the named field. Call get_meta to discover valid values.",
+            )
+            .with_actions(vec![NextAction::call(
+                "Discover queryable apps, event names, and attribute keys",
+                "get_meta",
+                json!({}),
+            )])
+            .into_result());
+        }
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_query(&v, &req).into_result(),
+            Err(f) => f.into_result(),
+        })
     }
 
-    #[tool(
-        description = "Discover what is queryable: apps, their event names, attribute keys, totals, and time span."
-    )]
+    /// Discover what is queryable: apps, their event names, attribute keys, totals, and time span.
+    #[tool(annotations(
+        title = "Discover schema",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
     pub async fn get_meta(&self) -> Result<CallToolResult, McpError> {
-        ok_json(&self.api.meta().await.map_err(to_mcp_err)?)
+        Ok(match self.api.meta().await {
+            Ok(m) => project_meta(&serde_json::to_value(&m).unwrap_or_default()).into_result(),
+            Err(e) => ToolFailure::from_client_error(e).into_result(),
+        })
     }
 
-    #[tool(
-        description = "How many unique users (anonymous installs) in a period, optionally filtered by app and/or event name. Example: unique users who ran a search in the last week."
-    )]
+    /// How many unique users (anonymous installs) in a period, optionally filtered by app and/or event name. Example: unique users who ran a search in the last week.
+    #[tool(annotations(title = "Unique users", read_only_hint = true, open_world_hint = false))]
     pub async fn unique_users(
         &self,
         Parameters(p): Parameters<UniqueUsersParams>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(
-            &self
-                .api
-                .query(&unique_users_query(&p))
-                .await
-                .map_err(to_mcp_err)?,
-        )
+        let req = unique_users_query(&p);
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_unique_users(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
     }
 
-    #[tool(
-        description = "The most used events (top-N event types) in a period, ranked by count or unique installs. Answers 'what is our most used X'."
-    )]
+    /// The most used events (top-N event types) in a period, ranked by count or unique installs. Answers 'what is our most used X'.
+    #[tool(annotations(title = "Top events", read_only_hint = true, open_world_hint = false))]
     pub async fn top_events(
         &self,
         Parameters(p): Parameters<TopEventsParams>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(
-            &self
-                .api
-                .query(&top_events_query(&p))
-                .await
-                .map_err(to_mcp_err)?,
-        )
+        let req = top_events_query(&p);
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_top_events(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
     }
 
-    #[tool(description = "Event volume over time (hour/day/week buckets) for trend questions.")]
+    /// Event volume over time (hour/day/week buckets) for trend questions.
+    #[tool(annotations(
+        title = "Events over time",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
     pub async fn events_over_time(
         &self,
         Parameters(p): Parameters<EventsOverTimeParams>,
     ) -> Result<CallToolResult, McpError> {
-        ok_json(
-            &self
-                .api
-                .query(&events_over_time_query(&p))
-                .await
-                .map_err(to_mcp_err)?,
-        )
+        let req = events_over_time_query(&p);
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_events_over_time(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
     }
 }
 
-#[tool_handler(router = self.tool_router)]
 impl ServerHandler for GaugeMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
@@ -110,6 +142,28 @@ impl ServerHandler for GaugeMcp {
              Start with get_meta to see what exists. Telemetry is anonymous: there is no way to \
              query individual users — only aggregate counts and unique-install counts.",
         )
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        let mut tools = self.tool_router.list_all();
+        apply_output_schemas(&mut tools);
+        Ok(ListToolsResult {
+            tools,
+            ..Default::default()
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        let ctx = ToolCallContext::new(self, request, context);
+        self.tool_router.call(ctx).await
     }
 }
 
