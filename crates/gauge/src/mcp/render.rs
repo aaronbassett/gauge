@@ -309,6 +309,7 @@ pub fn project_query(resp: &Value, req: &QueryRequest) -> ToolOutcome {
     // period, carrying forward any app/event_name equality filter so the suggested
     // trend keeps the original scope.
     // Only suggest this for plain count-style queries — not for aggregate/bucket queries.
+    // req.measures is guaranteed non-empty by validate(); `all` is not vacuously true here.
     let is_plain = req.measures.iter().all(|m| m.numeric_field().is_none())
         && !req
             .dimensions
@@ -736,6 +737,33 @@ mod tests {
             o.next_actions
                 .iter()
                 .all(|a| a.tool != Some("events_over_time"))
+        );
+    }
+
+    #[test]
+    fn project_query_skips_trend_for_bucket() {
+        use gauge_query::{BucketSpec, Dimension, Field, Measure, QueryRequest, TimeRange};
+        let resp = json!({ "rows": [ {"bucket": "50-200", "count": 77} ], "truncated": false, "elapsed_ms": 6 });
+        let req = QueryRequest {
+            measures: vec![Measure::Count],
+            dimensions: vec![Dimension::Bucket {
+                bucket: BucketSpec {
+                    field: Field::Attr("latency_ms".into()),
+                    edges: vec![50.0, 200.0],
+                },
+            }],
+            filters: vec![],
+            time_range: TimeRange::Last { last: "7d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        };
+        let o = project_query(&resp, &req);
+        assert!(
+            o.next_actions
+                .iter()
+                .all(|a| a.tool != Some("events_over_time")),
+            "bucket dimension should suppress the events_over_time suggestion"
         );
     }
 }
