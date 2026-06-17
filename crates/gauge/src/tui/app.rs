@@ -117,11 +117,14 @@ impl App {
                 self.explore.numeric_attr = match (&self.explore.numeric_attr, keys.first()) {
                     (None, Some(first)) => Some(first.clone()),
                     (Some(cur), _) => {
-                        let next = keys
+                        // If the previously selected key is no longer in the refreshed list
+                        // (stale), advance to the first key rather than clearing the selection.
+                        let next_i = keys
                             .iter()
                             .position(|k| k == cur)
-                            .map(|i| (i + 1) % keys.len().max(1));
-                        next.and_then(|i| keys.get(i).cloned())
+                            .map(|i| (i + 1) % keys.len())
+                            .unwrap_or(0);
+                        keys.get(next_i).cloned()
                     }
                     (None, None) => None,
                 };
@@ -134,14 +137,31 @@ impl App {
     pub fn explore_request(&self) -> gauge_query::QueryRequest {
         let measure = EXPLORE_MEASURES[self.explore.measure_idx];
         let measures: Vec<serde_json::Value> = if self.explore.measure_idx >= NUMERIC_MEASURE_BASE {
-            // numeric aggregate: {"avg":"attr.<key>"}; fall back to count if no attr chosen
-            match &self.explore.numeric_attr {
-                Some(key) => vec![serde_json::json!({ measure: format!("attr.{key}") })],
-                None => vec![serde_json::json!("count")],
+            // Numeric aggregate: {"avg":"attr.<key>"}. Emit the aggregate only when the key
+            // both exists and parses — a key containing characters Field::parse rejects (e.g.
+            // a hyphen) would deserialise to an Err and cause a panic at .expect(). Fall back
+            // to "count" when no attr is selected or the key is invalid.
+            let field_str = self
+                .explore
+                .numeric_attr
+                .as_deref()
+                .map(|k| format!("attr.{k}"));
+            let field_ok = field_str
+                .as_deref()
+                .map(|s| gauge_query::Field::parse(s).is_ok())
+                .unwrap_or(false);
+            if field_ok {
+                vec![serde_json::json!({ measure: field_str.unwrap() })]
+            } else {
+                vec![serde_json::json!("count")]
             }
         } else {
             vec![serde_json::json!(measure)]
         };
+        // NOTE: order is intentionally omitted for numeric aggregates. A numeric aggregate's
+        // output alias is `<agg>_<key>` (e.g. `avg_latency_ms`), not the literal measure
+        // name, so ordering by the measure name would be rejected by the server with
+        // BadOrderField. Default ordering is used instead.
         let json = serde_json::json!({
             "measures": measures,
             "dimensions": [EXPLORE_DIMENSIONS[self.explore.dimension_idx]],
@@ -167,5 +187,69 @@ mod tests {
             |m| matches!(m, gauge_query::Measure::Avg(f) if f.to_string() == "attr.latency_ms")
         ));
         gauge_query::validate(&req).unwrap();
+    }
+
+    #[test]
+    fn explore_request_numeric_without_attr_falls_back_to_count() {
+        let mut app = App::new();
+        app.explore.measure_idx = NUMERIC_MEASURE_BASE; // avg, but no attr chosen
+        app.explore.numeric_attr = None;
+        let req = app.explore_request();
+        // must fall back to Count (not panic, not emit an invalid aggregate)
+        assert_eq!(req.measures.len(), 1);
+        assert!(matches!(req.measures[0], gauge_query::Measure::Count));
+        gauge_query::validate(&req).unwrap();
+    }
+
+    fn snapshot_with_numeric_keys(keys: Vec<String>) -> crate::tui::data::Snapshot {
+        crate::tui::data::Snapshot {
+            fetched_at: time::OffsetDateTime::now_utc(),
+            window: crate::tui::data::TimeWindow::D7,
+            timeseries: vec![],
+            totals: vec![],
+            top_events: vec![],
+            apps: vec![gauge_query::AppMeta {
+                app: "test-app".into(),
+                event_names: vec![],
+                attribute_keys: vec![],
+                numeric_attribute_keys: keys,
+                first_event: None,
+                last_event: None,
+                total_events: 0,
+            }],
+        }
+    }
+
+    #[test]
+    fn n_key_cycles_numeric_attrs() {
+        use crossterm::event::KeyCode;
+        let mut app = App::new();
+        app.page = Page::Explore;
+        app.snapshot = Some(snapshot_with_numeric_keys(vec!["a".into(), "b".into()]));
+
+        // First press: None → "a"
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("a"));
+
+        // Second press: "a" → "b"
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("b"));
+
+        // Third press: "b" wraps → "a"
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn n_key_no_snapshot_is_noop() {
+        use crossterm::event::KeyCode;
+        let mut app = App::new();
+        app.page = Page::Explore;
+        // no snapshot set
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr, None);
+        // should not panic; a second press is also a no-op
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr, None);
     }
 }

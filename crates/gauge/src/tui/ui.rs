@@ -7,7 +7,7 @@ use ratatui::widgets::{
     Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, GraphType, Paragraph, Row, Table,
 };
 
-use crate::tui::app::{App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, Page};
+use crate::tui::app::{App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, NUMERIC_MEASURE_BASE, Page};
 
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -248,11 +248,26 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
+    // When a numeric measure is selected but no attr has been chosen yet, the query will
+    // fall back to "count". Reflect this honestly so the user knows an attr is required.
+    let needs_attr =
+        app.explore.measure_idx >= NUMERIC_MEASURE_BASE && app.explore.numeric_attr.is_none();
+    let attr_display = if needs_attr {
+        format!(
+            "(none — pick one to run {})",
+            EXPLORE_MEASURES[app.explore.measure_idx]
+        )
+    } else {
+        app.explore
+            .numeric_attr
+            .clone()
+            .unwrap_or_else(|| "(none)".into())
+    };
     let picker = Paragraph::new(format!(
         "measure (↑): {}    dimension (↓): {}    attr (n): {}    enter: run",
         EXPLORE_MEASURES[app.explore.measure_idx],
         EXPLORE_DIMENSIONS[app.explore.dimension_idx],
-        app.explore.numeric_attr.as_deref().unwrap_or("(none)"),
+        attr_display,
     ))
     .block(Block::default().borders(Borders::ALL).title("Explore"));
     f.render_widget(picker, chunks[0]);
