@@ -140,6 +140,10 @@ pub struct PanelSpec {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub edges: Vec<f64>, // histogram bucket edges
 
+    /// Whether this panel is hidden (skipped on rebuild). Toggled via the live menu.
+    #[serde(default)]
+    pub hidden: bool,
+
     /// Static per-panel filter pins, merged with the global filter bar at query time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<gauge_query::Filter>,
@@ -181,6 +185,7 @@ impl DashboardConfig {
                 limit: None,
                 attr: None,
                 edges: vec![],
+                hidden: false,
                 filters: vec![],
             }
         }
@@ -198,6 +203,7 @@ impl DashboardConfig {
                 limit: None,
                 attr: None,
                 edges: vec![],
+                hidden: false,
                 filters: vec![],
             }
         }
@@ -219,6 +225,7 @@ impl DashboardConfig {
             limit: None,
             attr: None,
             edges: vec![],
+            hidden: false,
             filters: vec![],
         };
         let top_events = PanelSpec {
@@ -234,6 +241,7 @@ impl DashboardConfig {
             limit: Some(5),
             attr: None,
             edges: vec![],
+            hidden: false,
             filters: vec![],
         };
         let latency = PanelSpec {
@@ -249,6 +257,7 @@ impl DashboardConfig {
             limit: None,
             attr: None, // auto-resolve to first numeric attr in meta (Plan 2)
             edges: vec![],
+            hidden: false,
             filters: vec![],
         };
 
@@ -614,5 +623,21 @@ name = "d"
     fn panel_spec_edges_default_empty() {
         let cfg = DashboardConfig::default_builtin();
         assert!(cfg.presets[0].panels[0].edges.is_empty());
+    }
+
+    #[test]
+    fn hidden_defaults_false_and_round_trips() {
+        let toml = r#"
+active_preset = "d"
+[[preset]]
+name = "d"
+  [[preset.panel]]
+  kind = "stat"
+  metric = "events"
+  hidden = true
+"#;
+        let cfg: DashboardConfig = toml::from_str(toml).unwrap();
+        assert!(cfg.presets[0].panels[0].hidden);
+        assert!(!DashboardConfig::default_builtin().presets[0].panels[0].hidden);
     }
 }

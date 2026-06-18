@@ -109,6 +109,7 @@ mod tests {
             limit: None,
             attr: None,
             edges: vec![],
+            hidden: false,
             filters: vec![],
         }
     }

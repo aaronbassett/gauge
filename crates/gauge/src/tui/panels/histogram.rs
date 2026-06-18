@@ -130,6 +130,7 @@ mod tests {
             limit: None,
             attr: Some("latency_ms".into()),
             edges,
+            hidden: false,
             filters: vec![],
         }
     }
