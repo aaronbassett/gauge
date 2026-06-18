@@ -111,6 +111,9 @@ impl Panel for Stat {
                 .collect();
             pairs.sort_by(|a, b| a.0.cmp(&b.0));
             let vals: Vec<f64> = pairs.into_iter().map(|(_, v)| v).collect();
+            // Split at the midpoint: recent half = current window, older half = previous.
+            // On an odd bucket count the current half gets the extra bucket — a known
+            // approximation for the trend arrow, noisiest at the coarse 1h window.
             let mid = vals.len() / 2;
             let previous: f64 = vals[..mid].iter().sum();
             let current: f64 = vals[mid..].iter().sum();

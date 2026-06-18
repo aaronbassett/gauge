@@ -75,14 +75,23 @@ impl Panel for Histogram {
             f.render_widget(Paragraph::new(msg).block(block), area);
             return;
         };
+        let attr_alias =
+            resolve_numeric_attr(&self.explicit_attr, ctx.meta).map(|k| format!("attr.{k}"));
         let bars: Vec<Bar> = resp
             .rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
-                let label = row
-                    .as_object()
-                    .and_then(|o| o.values().find_map(serde_json::Value::as_str))
+                // Read the bucket label by its known column alias (`attr.<key>`); fall
+                // back to the first string value only if that column is somehow absent.
+                let label = attr_alias
+                    .as_deref()
+                    .and_then(|a| row.get(a))
+                    .and_then(serde_json::Value::as_str)
+                    .or_else(|| {
+                        row.as_object()
+                            .and_then(|o| o.values().find_map(serde_json::Value::as_str))
+                    })
                     .unwrap_or("?")
                     .to_string();
                 Bar::default()
