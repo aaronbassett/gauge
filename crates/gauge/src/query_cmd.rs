@@ -29,4 +29,15 @@ mod tests {
     fn accepts_valid_request() {
         parse_request(r#"{"measures":["count"],"time_range":{"last":"1d"}}"#).unwrap();
     }
+
+    #[test]
+    fn accepts_numeric_bucket_aggregate_and_filter() {
+        parse_request(
+            r#"{"measures":[{"avg":"attr.latency_ms"},{"p95":"attr.latency_ms"}],
+                "dimensions":[{"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}}],
+                "filters":[{"field":"attr.latency_ms","op":"gt","value":0}],
+                "time_range":{"last":"7d"}}"#,
+        )
+        .unwrap();
+    }
 }

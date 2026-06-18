@@ -5,7 +5,10 @@
 //! `is_error: true` result carrying a shared error envelope.
 
 use crate::error::ClientError;
-use crate::mcp::tools::{EventsOverTimeParams, TopBy, TopEventsParams, UniqueUsersParams};
+use crate::mcp::tools::{
+    EventsOverTimeParams, NumericHistogramParams, NumericStatsParams, TopBy, TopEventsParams,
+    UniqueUsersParams,
+};
 use gauge_query::{Field, FilterOp, FilterValue, QueryRequest, TimeRange};
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value, json};
@@ -308,7 +311,15 @@ pub fn project_query(resp: &Value, req: &QueryRequest) -> ToolOutcome {
     // No granularity + a relative range -> offer a day-bucketed trend over the same
     // period, carrying forward any app/event_name equality filter so the suggested
     // trend keeps the original scope.
-    if req.granularity.is_none()
+    // Only suggest this for plain count-style queries — not for aggregate/bucket queries.
+    // req.measures is guaranteed non-empty by validate(); `all` is not vacuously true here.
+    let is_plain = req.measures.iter().all(|m| m.numeric_field().is_none())
+        && !req
+            .dimensions
+            .iter()
+            .any(|d| matches!(d, gauge_query::Dimension::Bucket { .. }));
+    if is_plain
+        && req.granularity.is_none()
         && let TimeRange::Last { last } = &req.time_range
     {
         let mut args = json!({ "period": last, "granularity": "day" });
@@ -413,6 +424,123 @@ pub fn project_top_events(resp: &Value, p: &TopEventsParams) -> ToolOutcome {
         ));
     }
     let trimmed = json!({ "top": rows.iter().take(p.limit.unwrap_or(10) as usize).cloned().collect::<Vec<_>>() });
+    ToolOutcome {
+        summary,
+        trimmed,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
+/// `numeric_stats` -> single-row `{ avg_*, min_*, max_*, p50_*..p99_* }`.
+pub fn project_numeric_stats(resp: &Value, p: &NumericStatsParams) -> ToolOutcome {
+    let row = rows_of(resp).first().cloned().unwrap_or_else(|| json!({}));
+    let g = |k: &str| row.get(k).and_then(Value::as_f64);
+    // Normalize away any "attr." prefix: the server's aggregate aliases are always
+    // <agg>_<bare_key> (e.g. "avg_latency_ms"), not "avg_attr.latency_ms".
+    let key = p.field.strip_prefix("attr.").unwrap_or(&p.field);
+    let num = |o: Option<f64>| o.map(|v| format!("{v:.0}")).unwrap_or_else(|| "n/a".into());
+    let scope = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => format!("{a} · {e}"),
+        (Some(a), None) => a.clone(),
+        (None, Some(e)) => e.clone(),
+        (None, None) => "all apps".to_owned(),
+    };
+    let summary = format!(
+        "{key} ({scope}, {}): avg {}, p95 {}, max {}.",
+        p.period,
+        num(g(&format!("avg_{key}"))),
+        num(g(&format!("p95_{key}"))),
+        num(g(&format!("max_{key}")))
+    );
+    // default edges; the agent can override per field semantics
+    let next_actions = vec![NextAction::call(
+        format!("See the {key} distribution as a histogram"),
+        "numeric_histogram",
+        match (&p.app, &p.event_name) {
+            (Some(a), Some(e)) => {
+                json!({ "period": p.period, "field": key, "app": a, "event_name": e, "edges": [50, 200, 500, 1000] })
+            }
+            (Some(a), None) => {
+                json!({ "period": p.period, "field": key, "app": a, "edges": [50, 200, 500, 1000] })
+            }
+            (None, Some(e)) => {
+                json!({ "period": p.period, "field": key, "event_name": e, "edges": [50, 200, 500, 1000] })
+            }
+            (None, None) => {
+                json!({ "period": p.period, "field": key, "edges": [50, 200, 500, 1000] })
+            }
+        },
+    )];
+    ToolOutcome {
+        summary,
+        trimmed: row,
+        structured: resp.clone(),
+        next_actions,
+    }
+}
+
+/// `numeric_histogram` -> rows `{ <bucket_alias>: "<label>", count, unique_installs }`.
+pub fn project_numeric_histogram(resp: &Value, p: &NumericHistogramParams) -> ToolOutcome {
+    let rows = rows_of(resp);
+    let key = &p.field;
+    let scope = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => format!("{a} · {e}"),
+        (Some(a), None) => a.clone(),
+        (None, Some(e)) => e.clone(),
+        (None, None) => "all apps".to_owned(),
+    };
+    // Resolve the bucket column key: prefer the alias echoed in the response meta, fall back to
+    // the canonical "attr.<bare_field>" form that the server always uses as the alias.
+    let bucket_col: String = resp
+        .get("meta")
+        .and_then(|m| m.get("buckets"))
+        .and_then(Value::as_array)
+        .and_then(|b| b.first())
+        .and_then(|b| b.get("alias"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            let bare = p.field.strip_prefix("attr.").unwrap_or(p.field.as_str());
+            format!("attr.{bare}")
+        });
+    // Find the peak bucket by count.
+    let peak = rows
+        .iter()
+        .max_by_key(|r| r.get("count").and_then(Value::as_i64).unwrap_or(0));
+    let summary = match peak {
+        Some(r) => format!(
+            "{key} distribution ({scope}, {}): {} buckets, peak {} in {}.",
+            p.period,
+            rows.len(),
+            r.get("count").and_then(Value::as_i64).unwrap_or(0),
+            r.get(bucket_col.as_str())
+                .and_then(Value::as_str)
+                .unwrap_or("?"),
+        ),
+        None => format!("{key} distribution ({scope}, {}): 0 buckets.", p.period),
+    };
+    // Cross-link back to numeric_stats for the same field/scope.
+    let stats_args = match (&p.app, &p.event_name) {
+        (Some(a), Some(e)) => {
+            json!({ "period": p.period, "field": key, "app": a, "event_name": e })
+        }
+        (Some(a), None) => json!({ "period": p.period, "field": key, "app": a }),
+        (None, Some(e)) => json!({ "period": p.period, "field": key, "event_name": e }),
+        (None, None) => json!({ "period": p.period, "field": key }),
+    };
+    let next_actions = vec![NextAction::call(
+        format!("See avg/min/max and percentiles for {key} over the same period"),
+        "numeric_stats",
+        stats_args,
+    )];
+    // A histogram's distribution shape is the whole point — show up to MAX_BUCKET_EDGES + 1 rows
+    // (the full set of possible buckets) rather than the generic FENCE_ROW_CAP (3).
+    let hist_row_cap = gauge_query::MAX_BUCKET_EDGES + 1;
+    let trimmed = json!({
+        "buckets": rows.len(),
+        "rows": rows.iter().take(hist_row_cap).cloned().collect::<Vec<_>>(),
+    });
     ToolOutcome {
         summary,
         trimmed,
@@ -708,5 +836,224 @@ mod tests {
         let o = project_meta(&resp);
         assert!(o.summary.contains("(none)"));
         assert!(o.next_actions.is_empty());
+    }
+
+    #[test]
+    fn project_query_skips_trend_for_aggregate() {
+        use gauge_query::{Field, Measure, QueryRequest, TimeRange};
+        let resp =
+            json!({ "rows": [ {"avg_latency_ms": 142.0} ], "truncated": false, "elapsed_ms": 5 });
+        let req = QueryRequest {
+            measures: vec![Measure::Avg(Field::Attr("latency_ms".into()))],
+            dimensions: vec![],
+            filters: vec![],
+            time_range: TimeRange::Last { last: "7d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        };
+        let o = project_query(&resp, &req);
+        assert!(
+            o.next_actions
+                .iter()
+                .all(|a| a.tool != Some("events_over_time"))
+        );
+    }
+
+    #[test]
+    fn project_query_skips_trend_for_bucket() {
+        use gauge_query::{BucketSpec, Dimension, Field, Measure, QueryRequest, TimeRange};
+        let resp = json!({ "rows": [ {"bucket": "50-200", "count": 77} ], "truncated": false, "elapsed_ms": 6 });
+        let req = QueryRequest {
+            measures: vec![Measure::Count],
+            dimensions: vec![Dimension::Bucket {
+                bucket: BucketSpec {
+                    field: Field::Attr("latency_ms".into()),
+                    edges: vec![50.0, 200.0],
+                },
+            }],
+            filters: vec![],
+            time_range: TimeRange::Last { last: "7d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        };
+        let o = project_query(&resp, &req);
+        assert!(
+            o.next_actions
+                .iter()
+                .all(|a| a.tool != Some("events_over_time")),
+            "bucket dimension should suppress the events_over_time suggestion"
+        );
+    }
+
+    /// Verifies that the projector reads the bucket column by alias (e.g. "attr.latency_ms"),
+    /// not the literal key "bucket". This is the assertion that catches the pre-fix bug where
+    /// `r.get("bucket")` always returned `None` and the summary always printed "?".
+    #[test]
+    fn project_numeric_histogram_names_peak_bucket_label() {
+        // Realistic response: rows keyed by "attr.latency_ms" (the server-assigned alias),
+        // plus meta that echoes the alias so the projector can resolve the column key.
+        let resp = json!({
+            "rows": [
+                { "attr.latency_ms": "<50",     "count": 120, "unique_installs": 80  },
+                { "attr.latency_ms": "50-200",  "count": 450, "unique_installs": 310 },
+                { "attr.latency_ms": "200+",    "count": 90,  "unique_installs": 60  }
+            ],
+            "truncated": false,
+            "elapsed_ms": 12,
+            "meta": {
+                "buckets": [
+                    {
+                        "field": "attr.latency_ms",
+                        "alias": "attr.latency_ms",
+                        "edges": [50, 200],
+                        "labels": ["<50", "50-200", "200+"]
+                    }
+                ]
+            }
+        });
+        let p = NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0],
+            app: None,
+            event_name: None,
+        };
+        let o = project_numeric_histogram(&resp, &p);
+
+        // Must name the actual peak bucket label ("50-200"), not the fallback "?".
+        assert!(
+            o.summary.contains("50-200"),
+            "summary should name the peak bucket label '50-200', got: {}",
+            o.summary
+        );
+        // Must report the correct count for the peak bucket.
+        assert!(
+            o.summary.contains("450"),
+            "summary should contain the peak count 450, got: {}",
+            o.summary
+        );
+        // next_actions must include a numeric_stats drill-down.
+        assert!(
+            o.next_actions
+                .iter()
+                .any(|a| a.tool == Some("numeric_stats")),
+            "expected a numeric_stats next action"
+        );
+    }
+
+    /// Regression: when the agent passes `field: "attr.latency_ms"` the projector must
+    /// strip the "attr." prefix before building the aggregate column keys.  Without the
+    /// fix the lookup keys would be "avg_attr.latency_ms" etc., which never match the
+    /// server-returned "avg_latency_ms", causing the summary to print "n/a" for every
+    /// stat.
+    #[test]
+    fn project_numeric_stats_handles_prefixed_field() {
+        // Server always returns bare-key aggregate aliases regardless of how the
+        // caller spelled the field.
+        let resp = json!({
+            "rows": [{
+                "avg_latency_ms": 142.0,
+                "p95_latency_ms": 480.0,
+                "max_latency_ms": 1200.0
+            }],
+            "truncated": false,
+            "elapsed_ms": 9
+        });
+        let p = NumericStatsParams {
+            period: "7d".into(),
+            field: "attr.latency_ms".into(), // prefixed — the bug trigger
+            app: None,
+            event_name: None,
+        };
+        let o = project_numeric_stats(&resp, &p);
+        assert!(
+            o.summary.contains("142"),
+            "summary should contain avg 142, got: {}",
+            o.summary
+        );
+        assert!(
+            o.summary.contains("480"),
+            "summary should contain p95 480, got: {}",
+            o.summary
+        );
+        assert!(
+            !o.summary.contains("n/a"),
+            "summary must not contain 'n/a' when stats are present, got: {}",
+            o.summary
+        );
+    }
+
+    #[test]
+    fn project_numeric_histogram_empty_rows_no_panic() {
+        let resp = json!({
+            "rows": [],
+            "truncated": false,
+            "elapsed_ms": 5,
+            "meta": {
+                "buckets": [
+                    {
+                        "field": "attr.latency_ms",
+                        "alias": "attr.latency_ms",
+                        "edges": [50, 200],
+                        "labels": ["<50", "50-200", "200+"]
+                    }
+                ]
+            }
+        });
+        let p = NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0],
+            app: None,
+            event_name: None,
+        };
+        let o = project_numeric_histogram(&resp, &p);
+        // Empty rows should produce a "0 buckets" summary without panicking.
+        assert!(
+            o.summary.contains("0 buckets"),
+            "empty rows should produce a '0 buckets' summary, got: {}",
+            o.summary
+        );
+    }
+
+    #[test]
+    fn project_numeric_histogram_next_action_targets_numeric_stats() {
+        let resp = json!({
+            "rows": [
+                { "attr.latency_ms": "50-200", "count": 300, "unique_installs": 200 }
+            ],
+            "truncated": false,
+            "elapsed_ms": 8,
+            "meta": {
+                "buckets": [
+                    {
+                        "field": "attr.latency_ms",
+                        "alias": "attr.latency_ms",
+                        "edges": [50, 200],
+                        "labels": ["<50", "50-200", "200+"]
+                    }
+                ]
+            }
+        });
+        let p = NumericHistogramParams {
+            period: "7d".into(),
+            field: "latency_ms".into(),
+            edges: vec![50.0, 200.0],
+            app: Some("tome".into()),
+            event_name: Some("tome.search".into()),
+        };
+        let o = project_numeric_histogram(&resp, &p);
+        let stats_action = o
+            .next_actions
+            .iter()
+            .find(|a| a.tool == Some("numeric_stats"))
+            .expect("expected a numeric_stats next action");
+        let args = stats_action.arguments.as_ref().unwrap();
+        assert_eq!(args["field"], json!("latency_ms"));
+        assert_eq!(args["period"], json!("7d"));
+        assert_eq!(args["app"], json!("tome"));
+        assert_eq!(args["event_name"], json!("tome.search"));
     }
 }

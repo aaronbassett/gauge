@@ -7,7 +7,7 @@ use ratatui::widgets::{
     Axis, Bar, BarChart, BarGroup, Block, Borders, Chart, Dataset, GraphType, Paragraph, Row, Table,
 };
 
-use crate::tui::app::{App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, Page};
+use crate::tui::app::{App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, NUMERIC_MEASURE_BASE, Page};
 
 pub fn render(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -248,16 +248,76 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
+    // When a numeric measure is selected but no attr has been chosen yet, the query will
+    // fall back to "count". Reflect this honestly so the user knows an attr is required.
+    let needs_attr =
+        app.explore.measure_idx >= NUMERIC_MEASURE_BASE && app.explore.numeric_attr.is_none();
+    let attr_display = if needs_attr {
+        format!(
+            "(none — pick one to run {})",
+            EXPLORE_MEASURES[app.explore.measure_idx]
+        )
+    } else {
+        app.explore
+            .numeric_attr
+            .clone()
+            .unwrap_or_else(|| "(none)".into())
+    };
     let picker = Paragraph::new(format!(
-        "measure (↑): {}    dimension (↓): {}    enter: run",
-        EXPLORE_MEASURES[app.explore.measure_idx], EXPLORE_DIMENSIONS[app.explore.dimension_idx],
+        "measure (↑): {}    dimension (↓): {}    attr (n): {}    enter: run",
+        EXPLORE_MEASURES[app.explore.measure_idx],
+        EXPLORE_DIMENSIONS[app.explore.dimension_idx],
+        attr_display,
     ))
     .block(Block::default().borders(Borders::ALL).title("Explore"));
     f.render_widget(picker, chunks[0]);
 
+    if let Some(hist) = &app.explore.histogram {
+        let hist_block = Block::default()
+            .borders(Borders::ALL)
+            .title("Histogram (h to refresh)");
+        if hist.rows.is_empty() {
+            f.render_widget(
+                Paragraph::new("no data for this attribute").block(hist_block),
+                chunks[1],
+            );
+            return;
+        }
+        let attr_alias = app
+            .explore
+            .numeric_attr
+            .as_ref()
+            .map(|k| format!("attr.{k}"))
+            .unwrap_or_default();
+        let bars: Vec<Bar> = hist
+            .rows
+            .iter()
+            .map(|r| {
+                Bar::default()
+                    .label(
+                        r[attr_alias.as_str()]
+                            .as_str()
+                            .unwrap_or("?")
+                            .to_string()
+                            .into(),
+                    )
+                    .value(r["count"].as_i64().unwrap_or(0) as u64)
+            })
+            .collect();
+        let chart = BarChart::default()
+            .block(hist_block)
+            .direction(Direction::Horizontal)
+            .bar_width(1)
+            .data(BarGroup::default().bars(&bars));
+        f.render_widget(chart, chunks[1]);
+        return;
+    }
     let block = Block::default().borders(Borders::ALL).title("Result");
     match &app.explore.result {
-        None => f.render_widget(Paragraph::new("press enter to run").block(block), chunks[1]),
+        None => f.render_widget(
+            Paragraph::new("press enter to run · n: pick attr · h: histogram").block(block),
+            chunks[1],
+        ),
         Some(resp) => {
             let lines: Vec<Line> = resp
                 .rows

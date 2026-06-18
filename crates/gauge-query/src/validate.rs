@@ -1,8 +1,12 @@
+use std::collections::HashSet;
+
 use thiserror::Error;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::field::Field;
-use crate::request::{FilterOp, FilterValue, MAX_LIMIT, QueryRequest, TimeRange};
+use crate::request::{
+    Dimension, FilterOp, FilterValue, MAX_BUCKET_EDGES, MAX_LIMIT, QueryRequest, TimeRange,
+};
 
 #[derive(Debug, Error, PartialEq)]
 pub enum QueryError {
@@ -18,6 +22,37 @@ pub enum QueryError {
     BadFilter(String, String, &'static str),
     #[error("order field `{0}` is not in the selected output")]
     BadOrderField(String),
+    #[error("numeric operation on `{0}` requires an attr.<key> field")]
+    NumericFieldRequired(String),
+    #[error(
+        "bucket edges on `{0}` must be non-empty, finite, strictly ascending, and at most {MAX_BUCKET_EDGES}"
+    )]
+    BadBucketEdges(String),
+    #[error("duplicate output `{0}` (two dimensions/measures resolve to the same column)")]
+    DuplicateOutput(String),
+}
+
+/// Human-readable bucket labels for `width_bucket` indices 0..=edges.len().
+/// e.g. `[50,200,500,1000]` → `["<50","50-200","200-500","500-1000","1000+"]`.
+pub fn bucket_labels(edges: &[f64]) -> Vec<String> {
+    fn fmt(x: f64) -> String {
+        if x.fract() == 0.0 && x.abs() < 1e15 {
+            format!("{}", x as i64)
+        } else {
+            format!("{x}")
+        }
+    }
+    let mut labels = Vec::with_capacity(edges.len() + 1);
+    if let Some(first) = edges.first() {
+        labels.push(format!("<{}", fmt(*first)));
+    }
+    for w in edges.windows(2) {
+        labels.push(format!("{}-{}", fmt(w[0]), fmt(w[1])));
+    }
+    if let Some(last) = edges.last() {
+        labels.push(format!("{}+", fmt(*last)));
+    }
+    labels
 }
 
 pub fn parse_last(s: &str) -> Result<Duration, QueryError> {
@@ -65,6 +100,37 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
     if req.measures.is_empty() {
         return Err(QueryError::EmptyMeasures);
     }
+    for m in &req.measures {
+        if let Some(f) = m.numeric_field()
+            && !matches!(f, Field::Attr(_))
+        {
+            return Err(QueryError::NumericFieldRequired(f.to_string()));
+        }
+    }
+    let mut seen: HashSet<String> = HashSet::new();
+    for d in &req.dimensions {
+        if let Dimension::Bucket { bucket } = d {
+            if !matches!(bucket.field, Field::Attr(_)) {
+                return Err(QueryError::NumericFieldRequired(bucket.field.to_string()));
+            }
+            let e = &bucket.edges;
+            let ok = !e.is_empty()
+                && e.len() <= MAX_BUCKET_EDGES
+                && e.iter().all(|x| x.is_finite())
+                && e.windows(2).all(|w| w[0] < w[1]);
+            if !ok {
+                return Err(QueryError::BadBucketEdges(bucket.field.to_string()));
+            }
+        }
+        if !seen.insert(d.alias()) {
+            return Err(QueryError::DuplicateOutput(d.alias()));
+        }
+    }
+    for m in &req.measures {
+        if !seen.insert(m.alias()) {
+            return Err(QueryError::DuplicateOutput(m.alias()));
+        }
+    }
     if let Some(l) = req.limit
         && l > MAX_LIMIT
     {
@@ -81,6 +147,21 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
                 if !matches!(f.field, Field::Attr(_)) {
                     return Err(QueryError::BadFilter(fname, opname, "an attr.<key> field"));
                 }
+            }
+            (
+                FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte,
+                Some(FilterValue::Num(_)),
+            ) => {
+                if !matches!(f.field, Field::Attr(_)) {
+                    return Err(QueryError::NumericFieldRequired(fname));
+                }
+            }
+            (FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte, _) => {
+                return Err(QueryError::BadFilter(
+                    fname,
+                    opname,
+                    "a numeric value on an attr.<key> field",
+                ));
             }
             (FilterOp::Eq | FilterOp::Neq, _) => {
                 return Err(QueryError::BadFilter(
@@ -102,4 +183,138 @@ pub fn validate(req: &QueryRequest) -> Result<(), QueryError> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::request::{Measure, QueryRequest};
+
+    fn req_with(measures: Vec<Measure>) -> QueryRequest {
+        QueryRequest {
+            measures,
+            dimensions: vec![],
+            filters: vec![],
+            time_range: crate::request::TimeRange::Last { last: "1d".into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_requires_attr_field() {
+        let ok = req_with(vec![Measure::Avg(Field::Attr("latency_ms".into()))]);
+        assert!(validate(&ok).is_ok());
+        let bad = req_with(vec![Measure::Avg(Field::Os)]);
+        assert!(matches!(
+            validate(&bad),
+            Err(QueryError::NumericFieldRequired(_))
+        ));
+    }
+
+    #[test]
+    fn bucket_edges_must_be_sorted_and_attr() {
+        use crate::request::{BucketSpec, Dimension};
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![Dimension::Bucket {
+            bucket: BucketSpec {
+                field: Field::Attr("latency_ms".into()),
+                edges: vec![200.0, 50.0],
+            },
+        }];
+        assert!(matches!(validate(&r), Err(QueryError::BadBucketEdges(_))));
+        r.dimensions[0] = Dimension::Bucket {
+            bucket: BucketSpec {
+                field: Field::App,
+                edges: vec![50.0, 200.0],
+            },
+        };
+        assert!(matches!(
+            validate(&r),
+            Err(QueryError::NumericFieldRequired(_))
+        ));
+    }
+
+    #[test]
+    fn bucket_labels_span_edges() {
+        let labels = crate::validate::bucket_labels(&[50.0, 200.0, 500.0, 1000.0]);
+        assert_eq!(
+            labels,
+            vec!["<50", "50-200", "200-500", "500-1000", "1000+"]
+        );
+        // fractional edges keep their decimals
+        assert_eq!(
+            crate::validate::bucket_labels(&[1.5, 3.0]),
+            vec!["<1.5", "1.5-3", "3+"]
+        );
+    }
+
+    #[test]
+    fn duplicate_output_rejected() {
+        use crate::request::{BucketSpec, Dimension};
+
+        // Case 1: two Dimension::Field entries with the same field (e.g. two Field::App).
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![Dimension::Field(Field::App), Dimension::Field(Field::App)];
+        assert!(matches!(validate(&r), Err(QueryError::DuplicateOutput(_))));
+
+        // Case 2: Dimension::Field and Dimension::Bucket on the same attr field — both
+        // produce alias "attr.latency_ms" because Dimension::alias() delegates to
+        // field().to_string() for both variants.
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![
+            Dimension::Field(Field::Attr("latency_ms".into())),
+            Dimension::Bucket {
+                bucket: BucketSpec {
+                    field: Field::Attr("latency_ms".into()),
+                    edges: vec![50.0, 200.0],
+                },
+            },
+        ];
+        assert!(matches!(validate(&r), Err(QueryError::DuplicateOutput(_))));
+
+        // Case 3: dimension-vs-measure alias collision.
+        // A genuine collision is not constructible: dimension aliases are the field's
+        // display string ("app", "attr.x"), while aggregate measure aliases are
+        // "{fn}_{key}" (e.g. "avg_latency_ms") and fixed-name measures are "count" /
+        // "unique_installs" / "unique_sessions" — none of which match any Field display
+        // string.  The guard's dim-vs-measure branch is therefore unreachable in
+        // practice; the real protection comes from cases 1 and 2 (dup dimensions).
+        // We confirm the guard still fires for a second bucket-vs-field collision on a
+        // different attr to keep regression coverage broad.
+        let mut r = req_with(vec![Measure::Count]);
+        r.dimensions = vec![
+            Dimension::Field(Field::Attr("duration_ms".into())),
+            Dimension::Bucket {
+                bucket: BucketSpec {
+                    field: Field::Attr("duration_ms".into()),
+                    edges: vec![100.0, 500.0],
+                },
+            },
+        ];
+        assert!(matches!(validate(&r), Err(QueryError::DuplicateOutput(_))));
+    }
+
+    #[test]
+    fn numeric_filter_requires_num_and_attr() {
+        use crate::request::{Filter, FilterOp, FilterValue};
+        let mut r = req_with(vec![Measure::Count]);
+        r.filters = vec![Filter {
+            field: Field::Attr("latency_ms".into()),
+            op: FilterOp::Gt,
+            value: Some(FilterValue::Num(500.0)),
+        }];
+        assert!(validate(&r).is_ok());
+        // gt on a non-attr field is rejected
+        r.filters[0].field = Field::Os;
+        assert!(matches!(
+            validate(&r),
+            Err(QueryError::NumericFieldRequired(_))
+        ));
+        // gt with a string value is rejected
+        r.filters[0].field = Field::Attr("latency_ms".into());
+        r.filters[0].value = Some(FilterValue::One("500".into()));
+        assert!(matches!(validate(&r), Err(QueryError::BadFilter(..))));
+    }
 }

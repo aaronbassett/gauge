@@ -13,12 +13,14 @@ use serde_json::{Value, json};
 
 use crate::api::ApiClient;
 use crate::mcp::render::{
-    ErrorKind, NextAction, ToolFailure, project_events_over_time, project_meta, project_query,
-    project_top_events, project_unique_users,
+    ErrorKind, NextAction, ToolFailure, project_events_over_time, project_meta,
+    project_numeric_histogram, project_numeric_stats, project_query, project_top_events,
+    project_unique_users,
 };
 use crate::mcp::schemas::apply_output_schemas;
 use crate::mcp::tools::{
-    EventsOverTimeParams, TopEventsParams, UniqueUsersParams, events_over_time_query,
+    EventsOverTimeParams, NumericHistogramParams, NumericStatsParams, TopEventsParams,
+    UniqueUsersParams, events_over_time_query, numeric_histogram_query, numeric_stats_query,
     top_events_query, unique_users_query,
 };
 
@@ -49,7 +51,7 @@ impl GaugeMcp {
         }
     }
 
-    /// Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions. Dimensions: app, event_name, app_version, os, arch, attr.<key>. Time ranges: {"last":"7d"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and attribute keys.
+    /// Run an analytics query over anonymous telemetry events. Measures: count, unique_installs, unique_sessions, plus numeric aggregates over a numeric attr.<key> as single-key objects — {"avg":"attr.latency_ms"}, min, max, p50, p90, p95, p99. Dimensions: app, event_name, app_version, os, arch, attr.<key>, and a numeric bucket {"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}} (rows carry the range label; meta.buckets echoes edges+labels). Filters: eq, neq, in, exists, and numeric gt, gte, lt, lte over a numeric attr.<key>. Non-numeric/null attribute values are excluded, never errored. Time ranges: {"last":"7d"} or RFC3339 from/to. Use get_meta first to discover apps, event names, and numeric_attribute_keys.
     #[tool(annotations(
         title = "Query telemetry",
         read_only_hint = true,
@@ -133,6 +135,56 @@ impl GaugeMcp {
             Err(f) => f.into_result(),
         })
     }
+
+    /// Summary statistics (avg/min/max and p50/p90/p95/p99) for a numeric attribute over a period. Field is a numeric attr key from get_meta's numeric_attribute_keys (e.g. "latency_ms").
+    #[tool(annotations(
+        title = "Numeric stats",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
+    pub async fn numeric_stats(
+        &self,
+        Parameters(p): Parameters<NumericStatsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = match numeric_stats_query(&p) {
+            Ok(r) => r,
+            Err(msg) => return Ok(ToolFailure::new(
+                ErrorKind::InvalidInput, msg,
+                "Pass a numeric attribute key from get_meta's numeric_attribute_keys (e.g. \"latency_ms\").",
+            ).into_result()),
+        };
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_numeric_stats(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
+    }
+
+    /// Bucketed count distribution for a numeric attribute. Supply edges (ascending) to define bucket boundaries; rows carry the range label plus count and unique_installs. Use numeric_stats first to learn the value range, then choose edges accordingly.
+    #[tool(annotations(
+        title = "Numeric histogram",
+        read_only_hint = true,
+        open_world_hint = false
+    ))]
+    pub async fn numeric_histogram(
+        &self,
+        Parameters(p): Parameters<NumericHistogramParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = match numeric_histogram_query(&p) {
+            Ok(r) => r,
+            Err(msg) => {
+                return Ok(ToolFailure::new(
+                    ErrorKind::InvalidInput,
+                    msg,
+                    "Pass a numeric attribute key from get_meta's numeric_attribute_keys (e.g. \"latency_ms\").",
+                )
+                .into_result());
+            }
+        };
+        Ok(match self.query_to_value(&req).await {
+            Ok(v) => project_numeric_histogram(&v, &p).into_result(),
+            Err(f) => f.into_result(),
+        })
+    }
 }
 
 impl ServerHandler for GaugeMcp {
@@ -182,7 +234,7 @@ mod tests {
         let mut tools = GaugeMcp::tool_router().list_all();
         apply_output_schemas(&mut tools);
 
-        assert_eq!(tools.len(), 5, "expected 5 MCP tools, got {}", tools.len());
+        assert_eq!(tools.len(), 7, "expected 7 MCP tools, got {}", tools.len());
 
         // Every tool is annotated read-only.
         for t in &tools {
@@ -206,6 +258,8 @@ mod tests {
             "unique_users",
             "top_events",
             "events_over_time",
+            "numeric_stats",
+            "numeric_histogram",
         ] {
             let t = tools
                 .iter()

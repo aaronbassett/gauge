@@ -12,6 +12,7 @@ use crate::tui::ui;
 enum Msg {
     Snapshot(Result<Snapshot, String>),
     Explore(Result<gauge_query::QueryResponse, String>),
+    Histogram(Result<gauge_query::QueryResponse, String>),
 }
 
 fn spawn_fetch(api: Arc<ApiClient>, w: TimeWindow, tx: tokio::sync::mpsc::Sender<Msg>) {
@@ -54,6 +55,20 @@ async fn event_loop(
                 let _ = tx.send(Msg::Explore(result)).await;
             });
         }
+        if app.explore.histogram_requested {
+            app.explore.histogram_requested = false;
+            if let Some(key) = app.explore.numeric_attr.clone() {
+                let api = api.clone();
+                let tx = tx.clone();
+                let w = app.window;
+                tokio::spawn(async move {
+                    let result = crate::tui::data::fetch_histogram(&api, w, &key)
+                        .await
+                        .map_err(|e| e.to_string());
+                    let _ = tx.send(Msg::Histogram(result)).await;
+                });
+            }
+        }
         terminal.draw(|f| ui::render(f, &app))?;
         tokio::select! {
             maybe_ev = events.next() => {
@@ -68,6 +83,8 @@ async fn event_loop(
                 Msg::Snapshot(Err(e)) => app.stale = Some(e),
                 Msg::Explore(Ok(r)) => app.explore.result = Some(r),
                 Msg::Explore(Err(e)) => app.stale = Some(e),
+                Msg::Histogram(Ok(r)) => app.explore.histogram = Some(r),
+                Msg::Histogram(Err(e)) => app.stale = Some(e),
             },
             _ = tick.tick() => app.refresh_requested = true,
         }

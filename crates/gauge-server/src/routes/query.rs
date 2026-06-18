@@ -45,6 +45,8 @@ pub async fn query(
             Bind::Text(s) => q.bind(s),
             Bind::TextArr(v) => q.bind(v),
             Bind::Time(t) => q.bind(*t),
+            Bind::Float(f) => q.bind(*f),
+            Bind::FloatArr(v) => q.bind(v),
         };
     }
     let rows = q.fetch_all(&mut *tx).await.map_err(|e| {
@@ -62,7 +64,7 @@ pub async fn query(
     for row in rows.iter().take(built.limit) {
         let mut obj = serde_json::Map::new();
         for col in &built.columns {
-            let v = match col.kind {
+            let v = match &col.kind {
                 ColKind::Text => row
                     .try_get::<Option<String>, _>(col.alias.as_str())
                     .map(|o| o.map(Value::String).unwrap_or(Value::Null)),
@@ -72,6 +74,12 @@ pub async fn query(
                 ColKind::TimeBucket => row
                     .try_get::<OffsetDateTime, _>(col.alias.as_str())
                     .map(|t| Value::String(t.format(&Rfc3339).unwrap_or_default())),
+                ColKind::Float => row
+                    .try_get::<Option<f64>, _>(col.alias.as_str())
+                    .map(sqlbuild::float_value),
+                ColKind::Bucket { labels } => row
+                    .try_get::<Option<i32>, _>(col.alias.as_str())
+                    .map(|i| sqlbuild::bucket_value(labels, i)),
             }
             .map_err(|_| {
                 ApiError::service_unavailable("row_decode", "failed to decode result row")
@@ -80,9 +88,17 @@ pub async fn query(
         }
         out.push(Value::Object(obj));
     }
+    let meta = if built.bucket_meta.is_empty() {
+        None
+    } else {
+        Some(gauge_query::QueryMeta {
+            buckets: built.bucket_meta.clone(),
+        })
+    };
     Ok(Json(QueryResponse {
         rows: out,
         truncated,
         elapsed_ms: started.elapsed().as_millis() as u64,
+        meta,
     }))
 }
