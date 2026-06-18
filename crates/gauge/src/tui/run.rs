@@ -47,6 +47,12 @@ async fn event_loop(
 
     loop {
         if app.refresh_requested {
+            // Each refresh spawns a detached fetch; overlapping fetches apply in
+            // completion order ("latest completion wins"), not request order. This is
+            // benign because panels recompute their result keys at render time — a
+            // stale ResultMap simply misses the current keys and panels show "loading…"
+            // until the freshest fetch lands, never wrong data. A generation guard could
+            // make it "latest request wins" if reorder flicker ever matters.
             app.refresh_requested = false;
             let ctx = app.ctx();
             let requests = data::collect_requests(&app.panels, &ctx);
