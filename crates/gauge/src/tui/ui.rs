@@ -2,11 +2,13 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Paragraph};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Block, Clear, Paragraph};
 
 use gauge_query::{Filter, FilterOp, FilterValue};
 
-use crate::tui::app::{App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, Mode, NUMERIC_MEASURE_BASE};
+use crate::tui::app::{
+    App, EXPLORE_DIMENSIONS, EXPLORE_MEASURES, FilterStep, Mode, NUMERIC_MEASURE_BASE,
+};
 use crate::tui::layout::solve;
 use crate::tui::panels::panel_block;
 
@@ -27,6 +29,9 @@ pub fn render(f: &mut Frame, app: &App) {
         Mode::Explore => render_explore(f, app, chunks[1]),
     }
     render_status_bar(f, app, chunks[2]);
+    if app.filter_input.is_some() {
+        render_filter_overlay(f, app, area);
+    }
 }
 
 fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
@@ -140,7 +145,7 @@ fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = match app.mode {
-        Mode::Dashboard => "tab:explore   p:preset   t:range   r:refresh   q:quit",
+        Mode::Dashboard => "tab:explore   /:filter   c:clear   p:preset   t:range   q:quit",
         Mode::Explore => "tab:dashboard   ↑:measure   ↓:dim   n:attr   enter:run   h:hist   t:range   q:quit",
     };
     f.render_widget(
@@ -231,6 +236,98 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+fn centered_rect(area: Rect, w: u16, h: u16) -> Rect {
+    let w = w.min(area.width);
+    let h = h.min(area.height);
+    Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
+fn op_label(op: FilterOp) -> &'static str {
+    match op {
+        FilterOp::Eq => "= (eq)",
+        FilterOp::Neq => "≠ (neq)",
+        FilterOp::In => "in",
+        FilterOp::Exists => "? (exists)",
+        FilterOp::Gt => "> (gt)",
+        FilterOp::Gte => "≥ (gte)",
+        FilterOp::Lt => "< (lt)",
+        FilterOp::Lte => "≤ (lte)",
+    }
+}
+
+fn list_lines<'a>(
+    out: &mut Vec<Line<'a>>,
+    items: &[String],
+    selected: usize,
+    theme: &crate::tui::theme::Theme,
+) {
+    for (i, item) in items.iter().enumerate() {
+        let style = if i == selected {
+            Style::default().fg(theme.palette.bg).bg(theme.palette.accents[0])
+        } else {
+            Style::default().fg(theme.palette.text)
+        };
+        out.push(Line::from(Span::styled(
+            format!(" {} {item}", if i == selected { "▸" } else { " " }),
+            style,
+        )));
+    }
+}
+
+fn render_filter_overlay(f: &mut Frame, app: &App, area: Rect) {
+    let Some(d) = &app.filter_input else { return };
+    let t = &app.theme;
+    let popup = centered_rect(area, 50, 16);
+    f.render_widget(Clear, popup);
+
+    let title = match d.step {
+        FilterStep::Field => "Add filter — field",
+        FilterStep::Op => "Add filter — operator",
+        FilterStep::Value => "Add filter — value",
+    };
+    let block = panel_block(title, t).style(Style::default().bg(t.palette.surface));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let mut lines: Vec<Line> = Vec::new();
+    match d.step {
+        FilterStep::Field => list_lines(&mut lines, &d.fields, d.field_idx, t),
+        FilterStep::Op => {
+            let labels: Vec<String> = d.ops.iter().map(|o| op_label(*o).to_string()).collect();
+            list_lines(&mut lines, &labels, d.op_idx, t);
+        }
+        FilterStep::Value => {
+            lines.push(Line::from(Span::styled(
+                format!(" value: {}", d.buffer),
+                Style::default().fg(t.palette.text).add_modifier(Modifier::BOLD),
+            )));
+            if !d.values.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    " suggestions (↑↓), or type:",
+                    Style::default().fg(t.palette.muted),
+                )));
+                list_lines(&mut lines, &d.values, d.value_idx, t);
+            } else {
+                lines.push(Line::from(Span::styled(
+                    " type a value",
+                    Style::default().fg(t.palette.muted),
+                )));
+            }
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " ↑↓ select · enter confirm · esc cancel",
+        Style::default().fg(t.palette.muted),
+    )));
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +374,23 @@ mod tests {
         let out = draw(&a, 100, 24);
         assert!(out.contains("Explore"));
         assert!(out.contains("measure"));
+    }
+
+    #[test]
+    fn filter_overlay_renders_when_open() {
+        let mut a = app();
+        a.meta = vec![gauge_query::AppMeta {
+            app: "tome".into(),
+            event_names: vec![],
+            attribute_keys: vec![],
+            numeric_attribute_keys: vec![],
+            first_event: None,
+            last_event: None,
+            total_events: 0,
+        }];
+        a.on_key(crossterm::event::KeyCode::Char('/'));
+        let out = draw(&a, 100, 30);
+        assert!(out.contains("Add filter"));
+        assert!(out.contains("app")); // first field candidate
     }
 }
