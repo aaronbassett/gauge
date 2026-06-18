@@ -1,8 +1,6 @@
 use gauge_query::{
-    AppMeta, BucketSpec, Dimension, Dir, Field, Granularity, Measure, Order, QueryRequest,
-    QueryResponse, TimeRange,
+    BucketSpec, Dimension, Field, Granularity, Measure, QueryRequest, QueryResponse, TimeRange,
 };
-use time::OffsetDateTime;
 
 use crate::api::ApiClient;
 use crate::error::ClientError;
@@ -57,19 +55,6 @@ impl TimeWindow {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Snapshot {
-    pub fetched_at: OffsetDateTime,
-    pub window: TimeWindow,
-    /// rows: {time_bucket, app, count}
-    pub timeseries: Vec<serde_json::Value>,
-    /// rows: {app, count, unique_installs, unique_sessions}
-    pub totals: Vec<serde_json::Value>,
-    /// rows: {event_name, count}
-    pub top_events: Vec<serde_json::Value>,
-    pub apps: Vec<AppMeta>,
-}
-
 fn base(w: TimeWindow) -> QueryRequest {
     QueryRequest {
         measures: vec![Measure::Count],
@@ -82,54 +67,6 @@ fn base(w: TimeWindow) -> QueryRequest {
         order: vec![],
         limit: None,
     }
-}
-
-pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientError> {
-    let timeseries = api
-        .query(&QueryRequest {
-            dimensions: vec![Dimension::Field(Field::App)],
-            granularity: Some(w.granularity()),
-            ..base(w)
-        })
-        .await?
-        .rows;
-    let totals = api
-        .query(&QueryRequest {
-            measures: vec![
-                Measure::Count,
-                Measure::UniqueInstalls,
-                Measure::UniqueSessions,
-            ],
-            dimensions: vec![Dimension::Field(Field::App)],
-            order: vec![Order {
-                field: "app".into(),
-                dir: Dir::Asc,
-            }],
-            ..base(w)
-        })
-        .await?
-        .rows;
-    let top_events = api
-        .query(&QueryRequest {
-            dimensions: vec![Dimension::Field(Field::EventName)],
-            order: vec![Order {
-                field: "count".into(),
-                dir: Dir::Desc,
-            }],
-            limit: Some(10),
-            ..base(w)
-        })
-        .await?
-        .rows;
-    let apps = api.meta().await?.apps;
-    Ok(Snapshot {
-        fetched_at: OffsetDateTime::now_utc(),
-        window: w,
-        timeseries,
-        totals,
-        top_events,
-        apps,
-    })
 }
 
 /// Round x up to a "nice" 1/2/5×10ⁿ step (for readable histogram edges).
