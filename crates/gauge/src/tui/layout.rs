@@ -44,6 +44,89 @@ pub fn partition_rows(cells: &[Cell]) -> Vec<Vec<usize>> {
     rows
 }
 
+/// Assign a `Rect` to each cell inside `area` over a 12-column grid.
+///
+/// Row heights: a row containing any fixed-height cell takes the max fixed height in
+/// that row; the remaining vertical space is split evenly among flexible rows (each
+/// at least 1 line, with any rounding remainder handed to the earliest flexible rows).
+/// Within a row, each cell's width is `span * (area.width / 12)`; the last cell in a
+/// row absorbs the rounding remainder up to its grid edge.
+pub fn solve(area: Rect, cells: &[Cell]) -> Vec<Rect> {
+    let mut out = vec![Rect::default(); cells.len()];
+    if cells.is_empty() || area.width == 0 || area.height == 0 {
+        return out;
+    }
+    let rows = partition_rows(cells);
+
+    // Per-row fixed height (max of fixed cells), or None if the row is fully flexible.
+    let row_fixed: Vec<Option<u16>> = rows
+        .iter()
+        .map(|r| r.iter().filter_map(|&i| cells[i].height).max())
+        .collect();
+    let fixed_total: u16 = row_fixed.iter().flatten().sum();
+    let flex_count = row_fixed.iter().filter(|h| h.is_none()).count() as u16;
+    let remaining = area.height.saturating_sub(fixed_total);
+    let flex_each = if flex_count > 0 {
+        (remaining / flex_count).max(1)
+    } else {
+        0
+    };
+    let mut flex_rem = if flex_count > 0 {
+        remaining.saturating_sub(flex_each * flex_count)
+    } else {
+        0
+    };
+
+    let col_unit = area.width / 12;
+    let mut y = area.y;
+    let bottom = area.y.saturating_add(area.height);
+
+    for (ri, row) in rows.iter().enumerate() {
+        let mut row_h = match row_fixed[ri] {
+            Some(h) => h,
+            None => {
+                let mut h = flex_each;
+                if flex_rem > 0 {
+                    h += 1;
+                    flex_rem -= 1;
+                }
+                h
+            }
+        };
+        // Never run past the bottom of the area.
+        row_h = row_h.min(bottom.saturating_sub(y));
+        if row_h == 0 {
+            break;
+        }
+
+        let mut x = area.x;
+        let mut used_cols = 0u16;
+        for (pos, &i) in row.iter().enumerate() {
+            let span = cells[i].span.clamp(1, 12);
+            let grid_edge = area.x + (used_cols + span).min(12) * col_unit;
+            let width = if pos + 1 == row.len() {
+                grid_edge.saturating_sub(x).max(1)
+            } else {
+                (span * col_unit).max(1)
+            };
+            out[i] = Rect {
+                x,
+                y,
+                width,
+                height: row_h,
+            };
+            x = x.saturating_add(width);
+            used_cols += span;
+        }
+
+        y = y.saturating_add(row_h);
+        if y >= bottom {
+            break;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,5 +153,74 @@ mod tests {
     fn a_single_overfull_cell_still_gets_its_own_row() {
         let c = cells(&[12, 12]);
         assert_eq!(partition_rows(&c), vec![vec![0], vec![1]]);
+    }
+
+    #[test]
+    fn solve_places_a_full_row_across_the_width() {
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 40,
+        };
+        let c = cells(&[12]); // one full-width flexible row
+        let rects = solve(area, &c);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].x, 0);
+        assert_eq!(rects[0].y, 0);
+        assert_eq!(rects[0].width, 120);
+        assert_eq!(rects[0].height, 40); // only flexible row → takes all height
+    }
+
+    #[test]
+    fn solve_splits_a_row_by_span_and_stacks_rows() {
+        // width 120 → col_unit 10. Row A: 4x span-3 fixed height 4. Row B: span-12 fill.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 24,
+        };
+        let c = vec![
+            Cell {
+                span: 3,
+                height: Some(4),
+            },
+            Cell {
+                span: 3,
+                height: Some(4),
+            },
+            Cell {
+                span: 3,
+                height: Some(4),
+            },
+            Cell {
+                span: 3,
+                height: Some(4),
+            },
+            Cell {
+                span: 12,
+                height: None,
+            },
+        ];
+        let rects = solve(area, &c);
+        // Row A: y=0, each height 4, widths 30 each, x at 0/30/60/90.
+        for (i, x) in [0u16, 30, 60, 90].iter().enumerate() {
+            assert_eq!(rects[i].y, 0);
+            assert_eq!(rects[i].height, 4);
+            assert_eq!(rects[i].x, *x);
+            assert_eq!(rects[i].width, 30);
+        }
+        // Row B: starts at y=4, gets remaining height 24-4=20, full width.
+        assert_eq!(rects[4].y, 4);
+        assert_eq!(rects[4].height, 20);
+        assert_eq!(rects[4].width, 120);
+    }
+
+    #[test]
+    fn solve_is_safe_for_zero_area() {
+        let rects = solve(Rect::default(), &cells(&[6, 6]));
+        assert_eq!(rects.len(), 2);
+        assert!(rects.iter().all(|r| r.width == 0 && r.height == 0));
     }
 }
