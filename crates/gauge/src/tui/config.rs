@@ -137,6 +137,8 @@ pub struct PanelSpec {
     pub limit: Option<u32>, // top_n
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attr: Option<String>, // numeric_stats / histogram
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edges: Vec<f64>, // histogram bucket edges
 
     /// Static per-panel filter pins, merged with the global filter bar at query time.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -178,6 +180,7 @@ impl DashboardConfig {
                 measure: None,
                 limit: None,
                 attr: None,
+                edges: vec![],
                 filters: vec![],
             }
         }
@@ -194,6 +197,7 @@ impl DashboardConfig {
                 measure: None,
                 limit: None,
                 attr: None,
+                edges: vec![],
                 filters: vec![],
             }
         }
@@ -214,6 +218,7 @@ impl DashboardConfig {
             measure: None,
             limit: None,
             attr: None,
+            edges: vec![],
             filters: vec![],
         };
         let top_events = PanelSpec {
@@ -228,6 +233,7 @@ impl DashboardConfig {
             measure: Some("count".into()),
             limit: Some(5),
             attr: None,
+            edges: vec![],
             filters: vec![],
         };
         let latency = PanelSpec {
@@ -242,6 +248,7 @@ impl DashboardConfig {
             measure: None,
             limit: None,
             attr: None, // auto-resolve to first numeric attr in meta (Plan 2)
+            edges: vec![],
             filters: vec![],
         };
 
@@ -586,5 +593,26 @@ name = "default"
         let (cfg, err) = load_from(&path);
         assert!(err.is_some(), "invalid toml must surface an error string");
         assert_eq!(cfg.active_preset, "default"); // fell back to default
+    }
+
+    #[test]
+    fn panel_spec_parses_histogram_edges() {
+        let toml = r#"
+active_preset = "d"
+[[preset]]
+name = "d"
+  [[preset.panel]]
+  kind = "histogram"
+  attr = "latency_ms"
+  edges = [50, 200, 600]
+"#;
+        let cfg: DashboardConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.presets[0].panels[0].edges, vec![50.0, 200.0, 600.0]);
+    }
+
+    #[test]
+    fn panel_spec_edges_default_empty() {
+        let cfg = DashboardConfig::default_builtin();
+        assert!(cfg.presets[0].panels[0].edges.is_empty());
     }
 }

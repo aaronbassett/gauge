@@ -265,6 +265,7 @@ mod tests {
             measure: None,
             limit: None,
             attr: None,
+            edges: vec![],
             filters: vec![],
         };
         assert_eq!(Cell::from_spec(&spec).height, Some(1));
