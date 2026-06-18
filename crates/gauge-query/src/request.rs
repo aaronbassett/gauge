@@ -161,11 +161,53 @@ impl schemars::JsonSchema for Measure {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+// `Serialize`/`JsonSchema` stay derived (untagged wire form: a bare string for a
+// field, a `{"bucket": ...}` object for a bucket). `Deserialize` is hand-written
+// below so an unknown field name produces `Field::parse`'s helpful "unknown field
+// `x`" error instead of serde's opaque "did not match any variant of untagged enum".
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum Dimension {
     Field(Field),                  // "app", "attr.surface"
     Bucket { bucket: BucketSpec }, // {"bucket":{"field":"attr.latency_ms","edges":[50,200,500,1000]}}
+}
+
+impl<'de> serde::Deserialize<'de> for Dimension {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = Dimension;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a field name string or a {\"bucket\": {field, edges}} object")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Dimension, E> {
+                // Field::parse names the offending field on failure.
+                Field::parse(v).map(Dimension::Field).map_err(E::custom)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Dimension, A::Error> {
+                let key: Option<String> = map.next_key()?;
+                match key.as_deref() {
+                    Some("bucket") => {
+                        let bucket: BucketSpec = map.next_value()?;
+                        if let Some(extra) = map.next_key::<String>()? {
+                            return Err(serde::de::Error::custom(format!(
+                                "unexpected key `{extra}` in bucket dimension"
+                            )));
+                        }
+                        Ok(Dimension::Bucket { bucket })
+                    }
+                    Some(other) => Err(serde::de::Error::custom(format!(
+                        "unknown dimension key `{other}` (expected a field name or `bucket`)"
+                    ))),
+                    None => Err(serde::de::Error::custom("empty dimension object")),
+                }
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -286,6 +328,28 @@ mod tests {
             r#"{"measures":["count"],"dimensions":["app","event_name"],"time_range":{"last":"1d"}}"#,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn dimension_unknown_field_error_names_it() {
+        use crate::request::{Dimension, QueryRequest};
+        // A non-addressable / unknown dimension must surface a message that names the
+        // offending field (the untagged-enum default would drop it). Guards the
+        // DB-backed `invalid_query_is_422_naming_the_field` integration test without a DB.
+        let err = serde_json::from_value::<Dimension>(serde_json::json!("install_id")).unwrap_err();
+        assert!(
+            err.to_string().contains("install_id"),
+            "dimension error should name the field, got: {err}"
+        );
+        // ...and the same holds when nested in a full request.
+        let err = serde_json::from_str::<QueryRequest>(
+            r#"{"measures":["count"],"dimensions":["install_id"],"time_range":{"last":"1d"}}"#,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("install_id"),
+            "request error should name the field, got: {err}"
+        );
     }
 
     #[test]
