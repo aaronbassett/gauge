@@ -1,5 +1,5 @@
 use crossterm::event::KeyCode;
-use gauge_query::{AppMeta, Filter, QueryRequest};
+use gauge_query::{AppMeta, Filter, FilterOp, FilterValue, QueryRequest};
 
 use crate::tui::config::{self, DashboardConfig};
 use crate::tui::data::TimeWindow;
@@ -11,6 +11,28 @@ use crate::tui::theme::Theme;
 pub enum Mode {
     Dashboard,
     Explore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterStep {
+    Field,
+    Op,
+    Value,
+}
+
+/// In-progress filter being entered through the overlay.
+#[derive(Debug, Clone)]
+pub struct FilterDraft {
+    pub step: FilterStep,
+    pub fields: Vec<String>,
+    pub field_idx: usize,
+    pub field: Option<String>,
+    pub ops: Vec<gauge_query::FilterOp>,
+    pub op_idx: usize,
+    pub op: Option<gauge_query::FilterOp>,
+    pub values: Vec<String>,
+    pub value_idx: usize,
+    pub buffer: String,
 }
 
 pub const EXPLORE_MEASURES: &[&str] = &[
@@ -53,6 +75,7 @@ pub struct App {
     pub config_error: Option<String>,
     pub panel_error: Option<String>,
     pub explore: ExploreState,
+    pub filter_input: Option<FilterDraft>,
     pub should_quit: bool,
     pub refresh_requested: bool,
 }
@@ -81,6 +104,7 @@ impl App {
             config_error,
             panel_error: None,
             explore: ExploreState::default(),
+            filter_input: None,
             should_quit: false,
             refresh_requested: true,
         };
@@ -157,7 +181,222 @@ impl App {
         self.explore.histogram = None;
     }
 
+    /// Addressable filter fields + meta attribute keys. Never includes the
+    /// non-addressable `install_id`/`session_id` (privacy).
+    pub fn filter_fields(&self) -> Vec<String> {
+        let mut v: Vec<String> = ["app", "event_name", "os", "arch", "app_version"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let mut attrs: Vec<String> = self
+            .meta
+            .iter()
+            .flat_map(|m| m.attribute_keys.iter().cloned())
+            .collect();
+        attrs.sort_unstable();
+        attrs.dedup();
+        v.extend(attrs.into_iter().map(|k| format!("attr.{k}")));
+        v
+    }
+
+    fn ops_for(&self, field: &str) -> Vec<FilterOp> {
+        let numeric = field
+            .strip_prefix("attr.")
+            .map(|k| {
+                self.meta
+                    .iter()
+                    .any(|m| m.numeric_attribute_keys.iter().any(|n| n == k))
+            })
+            .unwrap_or(false);
+        if numeric {
+            vec![
+                FilterOp::Eq,
+                FilterOp::Neq,
+                FilterOp::Gt,
+                FilterOp::Gte,
+                FilterOp::Lt,
+                FilterOp::Lte,
+                FilterOp::Exists,
+            ]
+        } else {
+            vec![FilterOp::Eq, FilterOp::Neq, FilterOp::In, FilterOp::Exists]
+        }
+    }
+
+    fn values_for(&self, field: &str) -> Vec<String> {
+        let mut v: Vec<String> = match field {
+            "app" => self.meta.iter().map(|m| m.app.clone()).collect(),
+            "event_name" => self
+                .meta
+                .iter()
+                .flat_map(|m| m.event_names.iter().cloned())
+                .collect(),
+            _ => vec![],
+        };
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    fn open_filter(&mut self) {
+        let fields = self.filter_fields();
+        self.filter_input = Some(FilterDraft {
+            step: FilterStep::Field,
+            fields,
+            field_idx: 0,
+            field: None,
+            ops: vec![],
+            op_idx: 0,
+            op: None,
+            values: vec![],
+            value_idx: 0,
+            buffer: String::new(),
+        });
+    }
+
+    fn filter_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Esc => self.filter_input = None,
+            KeyCode::Enter => self.filter_advance(),
+            KeyCode::Up | KeyCode::Down => {
+                let down = code == KeyCode::Down;
+                if let Some(d) = self.filter_input.as_mut() {
+                    let len = match d.step {
+                        FilterStep::Field => d.fields.len(),
+                        FilterStep::Op => d.ops.len(),
+                        FilterStep::Value => d.values.len(),
+                    };
+                    if len > 0 {
+                        let idx = match d.step {
+                            FilterStep::Field => &mut d.field_idx,
+                            FilterStep::Op => &mut d.op_idx,
+                            FilterStep::Value => &mut d.value_idx,
+                        };
+                        *idx = if down {
+                            (*idx + 1) % len
+                        } else {
+                            (*idx + len - 1) % len
+                        };
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(d) = self.filter_input.as_mut()
+                    && d.step == FilterStep::Value
+                {
+                    d.buffer.pop();
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(d) = self.filter_input.as_mut()
+                    && d.step == FilterStep::Value
+                {
+                    d.buffer.push(c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn filter_advance(&mut self) {
+        let step = match self.filter_input.as_ref() {
+            Some(d) => d.step,
+            None => return,
+        };
+        match step {
+            FilterStep::Field => {
+                let field = self
+                    .filter_input
+                    .as_ref()
+                    .and_then(|d| d.fields.get(d.field_idx).cloned());
+                if let Some(f) = field {
+                    let ops = self.ops_for(&f);
+                    if let Some(d) = self.filter_input.as_mut() {
+                        d.field = Some(f);
+                        d.ops = ops;
+                        d.op_idx = 0;
+                        d.step = FilterStep::Op;
+                    }
+                }
+            }
+            FilterStep::Op => {
+                let op = self
+                    .filter_input
+                    .as_ref()
+                    .and_then(|d| d.ops.get(d.op_idx).copied());
+                let field = self.filter_input.as_ref().and_then(|d| d.field.clone());
+                if let Some(op) = op {
+                    if op == FilterOp::Exists {
+                        if let Some(d) = self.filter_input.as_mut() {
+                            d.op = Some(op);
+                        }
+                        self.commit_filter(None);
+                    } else if let Some(f) = field {
+                        let values = self.values_for(&f);
+                        if let Some(d) = self.filter_input.as_mut() {
+                            d.op = Some(op);
+                            d.values = values;
+                            d.value_idx = 0;
+                            d.buffer.clear();
+                            d.step = FilterStep::Value;
+                        }
+                    }
+                }
+            }
+            FilterStep::Value => {
+                let chosen = self.filter_input.as_ref().and_then(|d| {
+                    if !d.buffer.is_empty() {
+                        Some(d.buffer.clone())
+                    } else {
+                        d.values.get(d.value_idx).cloned()
+                    }
+                });
+                if chosen.is_some() {
+                    self.commit_filter(chosen);
+                }
+            }
+        }
+    }
+
+    /// Build and push the filter, then close the overlay and refresh. Aborts (closing
+    /// the overlay) on an unparseable numeric value or unknown field.
+    fn commit_filter(&mut self, value: Option<String>) {
+        let (field_s, op) = match self.filter_input.as_ref() {
+            Some(d) => (d.field.clone(), d.op.unwrap_or(FilterOp::Eq)),
+            None => return,
+        };
+        self.filter_input = None;
+        let Some(field_s) = field_s else { return };
+        let Ok(field) = gauge_query::Field::parse(&field_s) else {
+            return;
+        };
+        let value = match op {
+            FilterOp::Exists => None,
+            FilterOp::Gt | FilterOp::Gte | FilterOp::Lt | FilterOp::Lte => {
+                match value.as_deref().and_then(|s| s.parse::<f64>().ok()) {
+                    Some(n) => Some(FilterValue::Num(n)),
+                    None => return, // invalid number → abort
+                }
+            }
+            FilterOp::In => Some(FilterValue::Many(
+                value
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect(),
+            )),
+            FilterOp::Eq | FilterOp::Neq => value.map(FilterValue::One),
+        };
+        self.filters.push(Filter { field, op, value });
+        self.refresh_requested = true;
+    }
+
     pub fn on_key(&mut self, code: KeyCode) {
+        if self.filter_input.is_some() {
+            self.filter_key(code);
+            return;
+        }
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Tab => {
@@ -173,6 +412,13 @@ impl App {
             }
             KeyCode::Char('r') => self.refresh_requested = true,
             KeyCode::Char('p') if self.mode == Mode::Dashboard => self.cycle_preset(),
+            KeyCode::Char('/') if self.mode == Mode::Dashboard => self.open_filter(),
+            KeyCode::Char('c') if self.mode == Mode::Dashboard => {
+                if !self.filters.is_empty() {
+                    self.filters.clear();
+                    self.refresh_requested = true;
+                }
+            }
             KeyCode::Up if self.mode == Mode::Explore => {
                 self.explore.measure_idx = (self.explore.measure_idx + 1) % EXPLORE_MEASURES.len()
             }
@@ -228,6 +474,119 @@ mod tests {
         app.config = DashboardConfig::default_builtin();
         app.rebuild_panels();
         app
+    }
+
+    fn app_with_meta() -> App {
+        let mut app = app_with_default();
+        app.meta = vec![AppMeta {
+            app: "tome".into(),
+            event_names: vec!["build".into(), "test".into()],
+            attribute_keys: vec!["latency_ms".into(), "surface".into()],
+            numeric_attribute_keys: vec!["latency_ms".into()],
+            first_event: None,
+            last_event: None,
+            total_events: 0,
+        }];
+        app
+    }
+
+    #[test]
+    fn filter_fields_exclude_identifying_fields() {
+        let app = app_with_meta();
+        let fields = app.filter_fields();
+        assert!(fields.contains(&"app".to_string()));
+        assert!(fields.contains(&"attr.latency_ms".to_string()));
+        assert!(!fields.iter().any(|f| f == "install_id" || f == "session_id"));
+    }
+
+    #[test]
+    fn slash_walks_field_op_value_and_commits_a_filter() {
+        let mut app = app_with_meta();
+        app.on_key(KeyCode::Char('/'));
+        assert!(app.filter_input.is_some());
+        // field: "app" is first
+        app.on_key(KeyCode::Enter); // choose app → Op step
+        assert_eq!(app.filter_input.as_ref().unwrap().step, FilterStep::Op);
+        // op: Eq is first
+        app.on_key(KeyCode::Enter); // choose Eq → Value step
+        assert_eq!(app.filter_input.as_ref().unwrap().step, FilterStep::Value);
+        // value: "tome" is the only suggestion
+        app.on_key(KeyCode::Enter);
+        assert!(app.filter_input.is_none());
+        assert_eq!(app.filters.len(), 1);
+        assert_eq!(app.filters[0].field, gauge_query::Field::App);
+        assert_eq!(app.filters[0].op, FilterOp::Eq);
+        assert!(matches!(&app.filters[0].value, Some(FilterValue::One(s)) if s == "tome"));
+        assert!(app.refresh_requested);
+    }
+
+    #[test]
+    fn exists_op_commits_without_a_value() {
+        let mut app = app_with_meta();
+        app.open_filter();
+        app.on_key(KeyCode::Enter); // app → Op
+        // move op selection to Exists (last in [Eq,Neq,In,Exists] = index 3)
+        for _ in 0..3 {
+            app.on_key(KeyCode::Down);
+        }
+        app.on_key(KeyCode::Enter);
+        assert!(app.filter_input.is_none());
+        assert_eq!(app.filters.len(), 1);
+        assert_eq!(app.filters[0].op, FilterOp::Exists);
+        assert!(app.filters[0].value.is_none());
+    }
+
+    #[test]
+    fn numeric_attr_gt_commits_a_number_via_typed_buffer() {
+        let mut app = app_with_meta();
+        app.open_filter();
+        // navigate to attr.latency_ms (the numeric attr; not necessarily the last field)
+        let li = app
+            .filter_input
+            .as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .position(|f| f == "attr.latency_ms")
+            .unwrap();
+        for _ in 0..li {
+            app.on_key(KeyCode::Down);
+        }
+        app.on_key(KeyCode::Enter); // → Op (numeric ops)
+        // ops = [Eq,Neq,Gt,Gte,Lt,Lte,Exists]; move to Gt (index 2)
+        app.on_key(KeyCode::Down);
+        app.on_key(KeyCode::Down);
+        app.on_key(KeyCode::Enter); // → Value
+        for c in "100".chars() {
+            app.on_key(KeyCode::Char(c));
+        }
+        app.on_key(KeyCode::Enter);
+        assert_eq!(app.filters.len(), 1);
+        assert_eq!(app.filters[0].op, FilterOp::Gt);
+        assert!(matches!(app.filters[0].value, Some(FilterValue::Num(n)) if (n - 100.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn c_clears_all_filters() {
+        let mut app = app_with_meta();
+        app.filters.push(Filter {
+            field: gauge_query::Field::Os,
+            op: FilterOp::Exists,
+            value: None,
+        });
+        app.refresh_requested = false;
+        app.on_key(KeyCode::Char('c'));
+        assert!(app.filters.is_empty());
+        assert!(app.refresh_requested);
+    }
+
+    #[test]
+    fn esc_cancels_the_overlay_without_adding_a_filter() {
+        let mut app = app_with_meta();
+        app.open_filter();
+        app.on_key(KeyCode::Esc);
+        assert!(app.filter_input.is_none());
+        assert!(app.filters.is_empty());
     }
 
     #[test]
