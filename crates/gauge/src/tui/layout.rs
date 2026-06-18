@@ -18,7 +18,9 @@ impl Cell {
     pub fn from_spec(p: &PanelSpec) -> Cell {
         Cell {
             span: p.span.clamp(1, 12),
-            height: p.height.as_ref().and_then(Height::rows),
+            // A fixed height of 0 would make `solve` terminate the layout early
+            // (dropping this panel and everything after it), so clamp it to >= 1.
+            height: p.height.as_ref().and_then(Height::rows).map(|h| h.max(1)),
         }
     }
 }
@@ -51,6 +53,10 @@ pub fn partition_rows(cells: &[Cell]) -> Vec<Vec<usize>> {
 /// at least 1 line, with any rounding remainder handed to the earliest flexible rows).
 /// Within a row, each cell's width is `span * (area.width / 12)`; the last cell in a
 /// row absorbs the rounding remainder up to its grid edge.
+///
+/// When the area is too short for every row, the straddling row is truncated to the
+/// space that remains and any rows beyond it keep their default zero `Rect` (the
+/// renderer skips zero-sized rects).
 pub fn solve(area: Rect, cells: &[Cell]) -> Vec<Rect> {
     let mut out = vec![Rect::default(); cells.len()];
     if cells.is_empty() || area.width == 0 || area.height == 0 {
@@ -215,6 +221,53 @@ mod tests {
         assert_eq!(rects[4].y, 4);
         assert_eq!(rects[4].height, 20);
         assert_eq!(rects[4].width, 120);
+    }
+
+    #[test]
+    fn solve_truncates_rows_that_dont_fit() {
+        // Two fixed rows want 4+4=8 lines but the area is only 5 tall.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 12,
+            height: 5,
+        };
+        let c = vec![
+            Cell {
+                span: 12,
+                height: Some(4),
+            },
+            Cell {
+                span: 12,
+                height: Some(4),
+            },
+        ];
+        let rects = solve(area, &c);
+        // First row gets its 4 lines; the second is truncated to the remaining 1.
+        assert_eq!(rects[0].height, 4);
+        assert_eq!(rects[0].y, 0);
+        assert_eq!(rects[1].height, 1);
+        assert_eq!(rects[1].y, 4);
+    }
+
+    #[test]
+    fn from_spec_clamps_zero_height_to_one() {
+        use crate::tui::config::{Height, PanelSpec};
+        let spec = PanelSpec {
+            kind: "stat".into(),
+            span: 3,
+            height: Some(Height::Rows(0)),
+            title: None,
+            metric: Some("events".into()),
+            metrics: vec![],
+            group_by: None,
+            field: None,
+            measure: None,
+            limit: None,
+            attr: None,
+            filters: vec![],
+        };
+        assert_eq!(Cell::from_spec(&spec).height, Some(1));
     }
 
     #[test]
