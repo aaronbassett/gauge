@@ -116,6 +116,13 @@ async fn event_loop(
             _ = tick.tick() => app.refresh_requested = true,
         }
 
+        if app.config_dirty {
+            app.config_dirty = false;
+            if let Err(e) = app.config.save() {
+                app.config_error = Some(format!("could not save dashboard.toml: {e}"));
+            }
+        }
+
         if app.should_quit {
             return Ok(());
         }
