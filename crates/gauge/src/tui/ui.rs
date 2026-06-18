@@ -32,6 +32,9 @@ pub fn render(f: &mut Frame, app: &App) {
     if app.filter_input.is_some() {
         render_filter_overlay(f, app, area);
     }
+    if app.menu.is_some() {
+        render_menu_overlay(f, app, area);
+    }
 }
 
 fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
@@ -145,7 +148,7 @@ fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = match app.mode {
-        Mode::Dashboard => "tab:explore   /:filter   c:clear   p:preset   t:range   q:quit",
+        Mode::Dashboard => "tab:explore   /:filter   c:clear   m:menu   p:preset   t:range   q:quit",
         Mode::Explore => "tab:dashboard   ↑:measure   ↓:dim   n:attr   enter:run   h:hist   t:range   q:quit",
     };
     f.render_widget(
@@ -328,6 +331,40 @@ fn render_filter_overlay(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
+fn render_menu_overlay(f: &mut Frame, app: &App, area: Rect) {
+    let Some(menu) = &app.menu else { return };
+    let t = &app.theme;
+
+    let mut items: Vec<String> = vec![
+        format!("Preset:  {}", app.config.active_preset),
+        format!("Theme:   {}", app.config.theme.name),
+        format!("Borders: {:?}", app.config.theme.borders),
+        format!("Meters:  {:?}", app.config.theme.meters),
+    ];
+    if let Some(preset) = app.config.active_preset() {
+        for spec in &preset.panels {
+            let mark = if spec.hidden { " " } else { "x" };
+            let label = spec.title.clone().unwrap_or_else(|| spec.kind.clone());
+            items.push(format!("[{mark}] {label}"));
+        }
+    }
+
+    let popup = centered_rect(area, 48, (items.len() as u16 + 4).min(area.height));
+    f.render_widget(Clear, popup);
+    let block = panel_block("Menu", t).style(Style::default().bg(t.palette.surface));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let mut lines: Vec<Line> = Vec::new();
+    list_lines(&mut lines, &items, menu.focus, t);
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " ↑↓ move · ←→ change · enter toggle panel · esc/m close",
+        Style::default().fg(t.palette.muted),
+    )));
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +429,15 @@ mod tests {
         let out = draw(&a, 100, 30);
         assert!(out.contains("Add filter"));
         assert!(out.contains("app")); // first field candidate
+    }
+
+    #[test]
+    fn menu_overlay_renders_when_open() {
+        let mut a = app();
+        a.on_key(crossterm::event::KeyCode::Char('m'));
+        let out = draw(&a, 100, 30);
+        assert!(out.contains("Menu"));
+        assert!(out.contains("Preset:"));
+        assert!(out.contains("Theme:"));
     }
 }
