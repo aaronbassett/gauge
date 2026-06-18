@@ -118,9 +118,10 @@ async fn event_loop(
 
         if app.config_dirty {
             app.config_dirty = false;
-            if let Err(e) = app.config.save() {
-                app.config_error = Some(format!("could not save dashboard.toml: {e}"));
-            }
+            app.save_error = match app.config.save() {
+                Ok(()) => None,
+                Err(e) => Some(format!("could not save dashboard.toml: {e}")),
+            };
         }
 
         if app.should_quit {

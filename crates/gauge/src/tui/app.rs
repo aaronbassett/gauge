@@ -82,8 +82,11 @@ pub struct App {
     pub results: ResultMap,
     /// Some(reason) → whole-fetch failure banner (last good data retained).
     pub stale: Option<String>,
+    /// Config parse/load error (sticky until a successful reload).
     pub config_error: Option<String>,
     pub panel_error: Option<String>,
+    /// Last live-save failure, cleared on the next successful save.
+    pub save_error: Option<String>,
     pub explore: ExploreState,
     pub filter_input: Option<FilterDraft>,
     pub menu: Option<MenuState>,
@@ -115,6 +118,7 @@ impl App {
             stale: None,
             config_error,
             panel_error: None,
+            save_error: None,
             explore: ExploreState::default(),
             filter_input: None,
             menu: None,

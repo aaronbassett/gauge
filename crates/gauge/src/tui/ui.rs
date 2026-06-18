@@ -84,6 +84,7 @@ fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
         .as_ref()
         .or(app.config_error.as_ref())
         .or(app.panel_error.as_ref())
+        .or(app.save_error.as_ref())
     {
         line2.push(Span::styled(
             format!("   ⚠ {banner}"),
