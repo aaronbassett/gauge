@@ -32,6 +32,15 @@ impl TimeWindow {
             Self::D30 => "30d",
         }
     }
+    /// The relative range string for twice this window (for current-vs-previous deltas).
+    pub fn doubled_last(&self) -> &'static str {
+        match self {
+            Self::H1 => "2h",
+            Self::H24 => "48h",
+            Self::D7 => "14d",
+            Self::D30 => "60d",
+        }
+    }
     pub fn granularity(&self) -> Granularity {
         match self {
             Self::H1 | Self::H24 => Granularity::Hour,
@@ -226,6 +235,14 @@ mod tests {
             &bucket.dimensions[0],
             gauge_query::Dimension::Bucket { .. }
         ));
+    }
+
+    #[test]
+    fn doubled_last_doubles_each_window() {
+        assert_eq!(TimeWindow::H1.doubled_last(), "2h");
+        assert_eq!(TimeWindow::H24.doubled_last(), "48h");
+        assert_eq!(TimeWindow::D7.doubled_last(), "14d");
+        assert_eq!(TimeWindow::D30.doubled_last(), "60d");
     }
 
     #[test]
