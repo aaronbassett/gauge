@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 use gauge_query::{AppMeta, Filter, FilterOp, FilterValue, QueryRequest};
 
-use crate::tui::config::{self, DashboardConfig};
+use crate::tui::config::{self, Borders, DashboardConfig, Meters};
 use crate::tui::data::TimeWindow;
 use crate::tui::layout::Cell;
 use crate::tui::panels::{self, Panel, PanelCtx, ResultMap};
@@ -34,6 +34,16 @@ pub struct FilterDraft {
     pub value_idx: usize,
     pub buffer: String,
 }
+
+/// Live customization menu. `focus` indexes a flat list of rows:
+/// 0=preset, 1=theme, 2=borders, 3=meters, then 4.. one row per panel.
+#[derive(Debug, Clone)]
+pub struct MenuState {
+    pub focus: usize,
+}
+
+pub const BUILTIN_THEMES: &[&str] =
+    &["tokyo-night", "catppuccin-mocha", "gruvbox-dark", "nord", "ansi"];
 
 pub const EXPLORE_MEASURES: &[&str] = &[
     "count",
@@ -76,6 +86,8 @@ pub struct App {
     pub panel_error: Option<String>,
     pub explore: ExploreState,
     pub filter_input: Option<FilterDraft>,
+    pub menu: Option<MenuState>,
+    pub config_dirty: bool,
     pub should_quit: bool,
     pub refresh_requested: bool,
 }
@@ -105,6 +117,8 @@ impl App {
             panel_error: None,
             explore: ExploreState::default(),
             filter_input: None,
+            menu: None,
+            config_dirty: false,
             should_quit: false,
             refresh_requested: true,
         };
@@ -132,6 +146,9 @@ impl App {
         self.cells.clear();
         let mut errs = Vec::new();
         for spec in &specs {
+            if spec.hidden {
+                continue;
+            }
             match panels::build(spec) {
                 Ok(p) => {
                     self.cells.push(Cell::from_spec(spec));
@@ -156,6 +173,124 @@ impl App {
         self.config.active_preset = names[(cur + 1) % names.len()].clone();
         self.rebuild_panels();
         self.refresh_requested = true;
+    }
+
+    fn menu_panel_count(&self) -> usize {
+        self.config.active_preset().map(|p| p.panels.len()).unwrap_or(0)
+    }
+
+    fn menu_rows(&self) -> usize {
+        4 + self.menu_panel_count()
+    }
+
+    fn active_preset_index(&self) -> Option<usize> {
+        let name = &self.config.active_preset;
+        self.config
+            .presets
+            .iter()
+            .position(|p| p.name == *name)
+            .or(if self.config.presets.is_empty() { None } else { Some(0) })
+    }
+
+    /// After any config mutation: rebuild panels, mark dirty (run loop persists), refresh.
+    fn after_config_change(&mut self) {
+        self.rebuild_panels();
+        self.config_dirty = true;
+        self.refresh_requested = true;
+    }
+
+    fn cycle_theme(&mut self, forward: bool) {
+        let n = BUILTIN_THEMES.len();
+        let cur = BUILTIN_THEMES.iter().position(|t| *t == self.config.theme.name).unwrap_or(0);
+        let next = if forward { (cur + 1) % n } else { (cur + n - 1) % n };
+        self.config.theme.name = BUILTIN_THEMES[next].to_string();
+        self.after_config_change();
+    }
+
+    fn cycle_preset_dir(&mut self, forward: bool) {
+        let names: Vec<String> = self.config.presets.iter().map(|p| p.name.clone()).collect();
+        if names.is_empty() {
+            return;
+        }
+        let n = names.len();
+        let cur = names.iter().position(|x| *x == self.config.active_preset).unwrap_or(0);
+        let next = if forward { (cur + 1) % n } else { (cur + n - 1) % n };
+        self.config.active_preset = names[next].clone();
+        self.after_config_change();
+    }
+
+    fn menu_key(&mut self, code: KeyCode) {
+        let rows = self.menu_rows();
+        match code {
+            KeyCode::Esc | KeyCode::Char('m') => self.menu = None,
+            KeyCode::Up => {
+                if let Some(m) = self.menu.as_mut()
+                    && rows > 0
+                {
+                    m.focus = (m.focus + rows - 1) % rows;
+                }
+            }
+            KeyCode::Down => {
+                if let Some(m) = self.menu.as_mut()
+                    && rows > 0
+                {
+                    m.focus = (m.focus + 1) % rows;
+                }
+            }
+            KeyCode::Left => self.menu_adjust(false),
+            KeyCode::Right => self.menu_adjust(true),
+            KeyCode::Enter | KeyCode::Char(' ') => self.menu_toggle(),
+            _ => {}
+        }
+    }
+
+    fn menu_adjust(&mut self, forward: bool) {
+        let focus = match self.menu.as_ref() {
+            Some(m) => m.focus,
+            None => return,
+        };
+        match focus {
+            0 => self.cycle_preset_dir(forward),
+            1 => self.cycle_theme(forward),
+            2 => {
+                self.config.theme.borders = match self.config.theme.borders {
+                    Borders::Rounded => Borders::Square,
+                    Borders::Square => Borders::Rounded,
+                };
+                self.after_config_change();
+            }
+            3 => {
+                self.config.theme.meters = match self.config.theme.meters {
+                    Meters::Gradient => Meters::Solid,
+                    Meters::Solid => Meters::Gradient,
+                };
+                self.after_config_change();
+            }
+            _ => {} // panel rows toggle with Enter/Space, not Left/Right
+        }
+    }
+
+    fn menu_toggle(&mut self) {
+        let focus = match self.menu.as_ref() {
+            Some(m) => m.focus,
+            None => return,
+        };
+        if focus < 4 {
+            return;
+        }
+        let pidx = focus - 4;
+        let Some(ai) = self.active_preset_index() else {
+            return;
+        };
+        let toggled = if let Some(spec) = self.config.presets[ai].panels.get_mut(pidx) {
+            spec.hidden = !spec.hidden;
+            true
+        } else {
+            false
+        };
+        if toggled {
+            self.after_config_change();
+        }
     }
 
     fn cycle_numeric_attr(&mut self) {
@@ -397,6 +532,10 @@ impl App {
             self.filter_key(code);
             return;
         }
+        if self.menu.is_some() {
+            self.menu_key(code);
+            return;
+        }
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Tab => {
@@ -412,6 +551,9 @@ impl App {
             }
             KeyCode::Char('r') => self.refresh_requested = true,
             KeyCode::Char('p') if self.mode == Mode::Dashboard => self.cycle_preset(),
+            KeyCode::Char('m') if self.mode == Mode::Dashboard => {
+                self.menu = Some(MenuState { focus: 0 })
+            }
             KeyCode::Char('/') if self.mode == Mode::Dashboard => self.open_filter(),
             KeyCode::Char('c') if self.mode == Mode::Dashboard => {
                 if !self.filters.is_empty() {
@@ -665,5 +807,59 @@ mod tests {
         app.explore.measure_idx = NUMERIC_MEASURE_BASE; // avg
         let req = app.explore_request();
         gauge_query::validate(&req).unwrap();
+    }
+
+    #[test]
+    fn m_opens_menu_at_first_row() {
+        let mut app = app_with_default();
+        app.on_key(KeyCode::Char('m'));
+        assert_eq!(app.menu.as_ref().unwrap().focus, 0);
+    }
+
+    #[test]
+    fn menu_cycles_theme_and_marks_dirty() {
+        let mut app = app_with_default();
+        app.config.theme.name = "tokyo-night".into();
+        app.on_key(KeyCode::Char('m'));
+        app.on_key(KeyCode::Down); // focus → theme (row 1)
+        app.config_dirty = false;
+        app.on_key(KeyCode::Right);
+        assert_eq!(app.config.theme.name, "catppuccin-mocha");
+        assert!(app.config_dirty);
+        assert_eq!(app.theme.name, "catppuccin-mocha"); // resolved theme updated
+    }
+
+    #[test]
+    fn menu_toggles_border_style() {
+        let mut app = app_with_default();
+        app.config.theme.borders = Borders::Rounded;
+        app.on_key(KeyCode::Char('m'));
+        app.on_key(KeyCode::Down);
+        app.on_key(KeyCode::Down); // focus → borders (row 2)
+        app.on_key(KeyCode::Right);
+        assert_eq!(app.config.theme.borders, Borders::Square);
+    }
+
+    #[test]
+    fn menu_hides_a_panel_and_rebuild_skips_it() {
+        let mut app = app_with_default();
+        assert_eq!(app.panels.len(), 10);
+        app.on_key(KeyCode::Char('m'));
+        // focus the first panel row (index 4)
+        for _ in 0..4 {
+            app.on_key(KeyCode::Down);
+        }
+        app.on_key(KeyCode::Enter); // toggle hidden on panel 0
+        assert!(app.config.presets[0].panels[0].hidden);
+        assert_eq!(app.panels.len(), 9, "hidden panel is skipped on rebuild");
+        assert!(app.config_dirty);
+    }
+
+    #[test]
+    fn esc_closes_menu() {
+        let mut app = app_with_default();
+        app.on_key(KeyCode::Char('m'));
+        app.on_key(KeyCode::Esc);
+        assert!(app.menu.is_none());
     }
 }
