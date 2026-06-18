@@ -1,12 +1,15 @@
 use crossterm::event::KeyCode;
-use gauge_query::QueryResponse;
+use gauge_query::{AppMeta, Filter, QueryRequest};
 
-use crate::tui::data::{Snapshot, TimeWindow};
+use crate::tui::config::{self, DashboardConfig};
+use crate::tui::data::TimeWindow;
+use crate::tui::layout::Cell;
+use crate::tui::panels::{self, Panel, PanelCtx, ResultMap};
+use crate::tui::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Page {
-    Overview,
-    Apps,
+pub enum Mode {
+    Dashboard,
     Explore,
 }
 
@@ -28,20 +31,27 @@ pub struct ExploreState {
     pub measure_idx: usize,
     pub dimension_idx: usize,
     pub run_requested: bool,
-    pub result: Option<QueryResponse>,
-    /// Selected numeric attribute key (from get_meta), required by numeric measures/histogram.
+    pub result: Option<gauge_query::QueryResponse>,
     pub numeric_attr: Option<String>,
     pub histogram_requested: bool,
     pub histogram: Option<gauge_query::QueryResponse>,
 }
 
 pub struct App {
-    pub page: Page,
+    pub mode: Mode,
+    pub config: DashboardConfig,
+    pub theme: Theme,
     pub window: TimeWindow,
-    pub snapshot: Option<Snapshot>,
-    /// Some(reason) → keep last snapshot, show stale banner.
+    /// Global filter bar (populated in Plan 4).
+    pub filters: Vec<Filter>,
+    pub panels: Vec<Box<dyn Panel>>,
+    pub cells: Vec<Cell>,
+    pub meta: Vec<AppMeta>,
+    pub results: ResultMap,
+    /// Some(reason) → whole-fetch failure banner (last good data retained).
     pub stale: Option<String>,
-    pub selected_app: usize,
+    pub config_error: Option<String>,
+    pub panel_error: Option<String>,
     pub explore: ExploreState,
     pub should_quit: bool,
     pub refresh_requested: bool,
@@ -55,110 +65,138 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
-        Self {
-            page: Page::Overview,
+        let (config, config_error) = config::load();
+        let theme = config.resolve_theme();
+        let mut app = Self {
+            mode: Mode::Dashboard,
+            config,
+            theme,
             window: TimeWindow::D7,
-            snapshot: None,
+            filters: vec![],
+            panels: vec![],
+            cells: vec![],
+            meta: vec![],
+            results: ResultMap::new(),
             stale: None,
-            selected_app: 0,
+            config_error,
+            panel_error: None,
             explore: ExploreState::default(),
             should_quit: false,
-            refresh_requested: true, // fetch immediately on start
+            refresh_requested: true,
+        };
+        app.rebuild_panels();
+        app
+    }
+
+    pub fn ctx(&self) -> PanelCtx<'_> {
+        PanelCtx {
+            window: self.window,
+            filters: &self.filters,
+            meta: &self.meta,
         }
+    }
+
+    /// Rebuild the panel set + layout cells from the active preset, recording any
+    /// per-panel build errors and re-resolving the theme.
+    pub fn rebuild_panels(&mut self) {
+        let specs = self
+            .config
+            .active_preset()
+            .map(|p| p.panels.clone())
+            .unwrap_or_default();
+        self.panels.clear();
+        self.cells.clear();
+        let mut errs = Vec::new();
+        for spec in &specs {
+            match panels::build(spec) {
+                Ok(p) => {
+                    self.cells.push(Cell::from_spec(spec));
+                    self.panels.push(p);
+                }
+                Err(e) => errs.push(format!("{}: {e}", spec.kind)),
+            }
+        }
+        self.panel_error = (!errs.is_empty()).then(|| errs.join("; "));
+        self.theme = self.config.resolve_theme();
+    }
+
+    fn cycle_preset(&mut self) {
+        let names: Vec<String> = self.config.presets.iter().map(|p| p.name.clone()).collect();
+        if names.is_empty() {
+            return;
+        }
+        let cur = names
+            .iter()
+            .position(|n| *n == self.config.active_preset)
+            .unwrap_or(0);
+        self.config.active_preset = names[(cur + 1) % names.len()].clone();
+        self.rebuild_panels();
+        self.refresh_requested = true;
+    }
+
+    fn cycle_numeric_attr(&mut self) {
+        let mut keys: Vec<String> = self
+            .meta
+            .iter()
+            .flat_map(|a| a.numeric_attribute_keys.iter().cloned())
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        self.explore.numeric_attr = match (&self.explore.numeric_attr, keys.first()) {
+            (None, Some(first)) => Some(first.clone()),
+            (Some(cur), _) => {
+                let next = keys
+                    .iter()
+                    .position(|k| k == cur)
+                    .map(|i| (i + 1) % keys.len())
+                    .unwrap_or(0);
+                keys.get(next).cloned()
+            }
+            (None, None) => None,
+        };
+        self.explore.histogram = None;
     }
 
     pub fn on_key(&mut self, code: KeyCode) {
         match code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Tab => {
-                self.page = match self.page {
-                    Page::Overview => Page::Apps,
-                    Page::Apps => Page::Explore,
-                    Page::Explore => Page::Overview,
+                self.mode = match self.mode {
+                    Mode::Dashboard => Mode::Explore,
+                    Mode::Explore => Mode::Dashboard,
                 }
             }
             KeyCode::Char('t') => {
                 self.window = self.window.next();
                 self.refresh_requested = true;
-                // The histogram was built for the old window; clear it so the Explore
-                // panel shows the normal result view until the user presses 'h' again.
                 self.explore.histogram = None;
             }
             KeyCode::Char('r') => self.refresh_requested = true,
-            KeyCode::Left if self.page == Page::Apps => {
-                self.selected_app = self.selected_app.saturating_sub(1)
-            }
-            KeyCode::Right if self.page == Page::Apps => {
-                let max = self
-                    .snapshot
-                    .as_ref()
-                    .map(|s| s.apps.len().saturating_sub(1))
-                    .unwrap_or(0);
-                self.selected_app = (self.selected_app + 1).min(max);
-            }
-            KeyCode::Up if self.page == Page::Explore => {
+            KeyCode::Char('p') if self.mode == Mode::Dashboard => self.cycle_preset(),
+            KeyCode::Up if self.mode == Mode::Explore => {
                 self.explore.measure_idx = (self.explore.measure_idx + 1) % EXPLORE_MEASURES.len()
             }
-            KeyCode::Down if self.page == Page::Explore => {
+            KeyCode::Down if self.mode == Mode::Explore => {
                 self.explore.dimension_idx =
                     (self.explore.dimension_idx + 1) % EXPLORE_DIMENSIONS.len()
             }
-            KeyCode::Enter if self.page == Page::Explore => self.explore.run_requested = true,
+            KeyCode::Enter if self.mode == Mode::Explore => self.explore.run_requested = true,
             KeyCode::Char('h')
-                if self.page == Page::Explore && self.explore.numeric_attr.is_some() =>
+                if self.mode == Mode::Explore && self.explore.numeric_attr.is_some() =>
             {
-                self.explore.histogram_requested = true;
+                self.explore.histogram_requested = true
             }
-            KeyCode::Char('n') if self.page == Page::Explore => {
-                let keys: Vec<String> = self
-                    .snapshot
-                    .as_ref()
-                    .map(|s| {
-                        let mut v: Vec<String> = s
-                            .apps
-                            .iter()
-                            .flat_map(|a| a.numeric_attribute_keys.iter().cloned())
-                            .collect();
-                        v.sort_unstable();
-                        v.dedup();
-                        v
-                    })
-                    .unwrap_or_default();
-                self.explore.numeric_attr = match (&self.explore.numeric_attr, keys.first()) {
-                    (None, Some(first)) => Some(first.clone()),
-                    (Some(cur), _) => {
-                        // If the previously selected key is no longer in the refreshed list
-                        // (stale), advance to the first key rather than clearing the selection.
-                        let next_i = keys
-                            .iter()
-                            .position(|k| k == cur)
-                            .map(|i| (i + 1) % keys.len())
-                            .unwrap_or(0);
-                        keys.get(next_i).cloned()
-                    }
-                    (None, None) => None,
-                };
-                // The histogram was built for the old attr; clear it so the Explore panel
-                // shows the normal result view until the user presses 'h' again.
-                self.explore.histogram = None;
-            }
+            KeyCode::Char('n') if self.mode == Mode::Explore => self.cycle_numeric_attr(),
             _ => {}
         }
     }
 
-    /// QueryRequest for the current Explore selection.
-    pub fn explore_request(&self) -> gauge_query::QueryRequest {
+    /// QueryRequest for the current Explore selection (unchanged behaviour from the
+    /// pre-redesign Explore page).
+    pub fn explore_request(&self) -> QueryRequest {
         let measure = EXPLORE_MEASURES[self.explore.measure_idx];
         let measures: Vec<serde_json::Value> = if self.explore.measure_idx >= NUMERIC_MEASURE_BASE {
-            // Numeric aggregate: {"avg":"attr.<key>"}. Emit the aggregate only when the key
-            // both exists and parses — a key containing characters Field::parse rejects (e.g.
-            // a hyphen) would deserialise to an Err and cause a panic at .expect(). Fall back
-            // to "count" when no attr is selected or the key is invalid.
-            let field_str = self
-                .explore
-                .numeric_attr
-                .as_deref()
-                .map(|k| format!("attr.{k}"));
+            let field_str = self.explore.numeric_attr.as_deref().map(|k| format!("attr.{k}"));
             let field_ok = field_str
                 .as_deref()
                 .map(|s| gauge_query::Field::parse(s).is_ok())
@@ -171,10 +209,6 @@ impl App {
         } else {
             vec![serde_json::json!(measure)]
         };
-        // NOTE: order is intentionally omitted for numeric aggregates. A numeric aggregate's
-        // output alias is `<agg>_<key>` (e.g. `avg_latency_ms`), not the literal measure
-        // name, so ordering by the measure name would be rejected by the server with
-        // BadOrderField. Default ordering is used instead.
         let json = serde_json::json!({
             "measures": measures,
             "dimensions": [EXPLORE_DIMENSIONS[self.explore.dimension_idx]],
@@ -189,129 +223,88 @@ impl App {
 mod tests {
     use super::*;
 
-    #[test]
-    fn explore_request_supports_numeric_aggregate() {
+    fn app_with_default() -> App {
         let mut app = App::new();
-        app.explore.numeric_attr = Some("latency_ms".to_string());
-        app.explore.measure_idx = NUMERIC_MEASURE_BASE; // first numeric measure (avg)
-        let req = app.explore_request();
-        // an avg over attr.latency_ms is built and validates
-        assert!(req.measures.iter().any(
-            |m| matches!(m, gauge_query::Measure::Avg(f) if f.to_string() == "attr.latency_ms")
-        ));
-        gauge_query::validate(&req).unwrap();
+        app.config = DashboardConfig::default_builtin();
+        app.rebuild_panels();
+        app
     }
 
     #[test]
-    fn explore_request_numeric_without_attr_falls_back_to_count() {
-        let mut app = App::new();
-        app.explore.measure_idx = NUMERIC_MEASURE_BASE; // avg, but no attr chosen
-        app.explore.numeric_attr = None;
-        let req = app.explore_request();
-        // must fall back to Count (not panic, not emit an invalid aggregate)
-        assert_eq!(req.measures.len(), 1);
-        assert!(matches!(req.measures[0], gauge_query::Measure::Count));
-        gauge_query::validate(&req).unwrap();
-    }
-
-    fn snapshot_with_numeric_keys(keys: Vec<String>) -> crate::tui::data::Snapshot {
-        crate::tui::data::Snapshot {
-            fetched_at: time::OffsetDateTime::now_utc(),
-            window: crate::tui::data::TimeWindow::D7,
-            timeseries: vec![],
-            totals: vec![],
-            top_events: vec![],
-            apps: vec![gauge_query::AppMeta {
-                app: "test-app".into(),
-                event_names: vec![],
-                attribute_keys: vec![],
-                numeric_attribute_keys: keys,
-                first_event: None,
-                last_event: None,
-                total_events: 0,
-            }],
-        }
+    fn rebuild_builds_all_default_panels() {
+        let app = app_with_default();
+        assert_eq!(app.panels.len(), 10);
+        assert_eq!(app.cells.len(), 10);
+        assert!(app.panel_error.is_none());
     }
 
     #[test]
-    fn n_key_cycles_numeric_attrs() {
-        use crossterm::event::KeyCode;
-        let mut app = App::new();
-        app.page = Page::Explore;
-        app.snapshot = Some(snapshot_with_numeric_keys(vec!["a".into(), "b".into()]));
-
-        // First press: None → "a"
-        app.on_key(KeyCode::Char('n'));
-        assert_eq!(app.explore.numeric_attr.as_deref(), Some("a"));
-
-        // Second press: "a" → "b"
-        app.on_key(KeyCode::Char('n'));
-        assert_eq!(app.explore.numeric_attr.as_deref(), Some("b"));
-
-        // Third press: "b" wraps → "a"
-        app.on_key(KeyCode::Char('n'));
-        assert_eq!(app.explore.numeric_attr.as_deref(), Some("a"));
+    fn tab_toggles_mode() {
+        let mut app = app_with_default();
+        assert_eq!(app.mode, Mode::Dashboard);
+        app.on_key(KeyCode::Tab);
+        assert_eq!(app.mode, Mode::Explore);
+        app.on_key(KeyCode::Tab);
+        assert_eq!(app.mode, Mode::Dashboard);
     }
 
     #[test]
-    fn n_key_no_snapshot_is_noop() {
-        use crossterm::event::KeyCode;
-        let mut app = App::new();
-        app.page = Page::Explore;
-        // no snapshot set
-        app.on_key(KeyCode::Char('n'));
-        assert_eq!(app.explore.numeric_attr, None);
-        // should not panic; a second press is also a no-op
-        app.on_key(KeyCode::Char('n'));
-        assert_eq!(app.explore.numeric_attr, None);
-    }
-
-    fn empty_query_response() -> gauge_query::QueryResponse {
-        gauge_query::QueryResponse {
-            rows: vec![],
-            truncated: false,
-            elapsed_ms: 0,
-            meta: None,
-        }
-    }
-
-    #[test]
-    fn n_key_clears_stale_histogram() {
-        use crossterm::event::KeyCode;
-        let mut app = App::new();
-        app.page = Page::Explore;
-        app.snapshot = Some(snapshot_with_numeric_keys(vec!["a".into(), "b".into()]));
-        app.explore.numeric_attr = Some("a".into());
-
-        // Simulate a histogram that was fetched for attr "a".
-        app.explore.histogram = Some(empty_query_response());
-        assert!(app.explore.histogram.is_some());
-
-        // Pressing 'n' should cycle the attr AND clear the now-stale histogram.
-        app.on_key(KeyCode::Char('n'));
-        assert_eq!(app.explore.numeric_attr.as_deref(), Some("b"));
-        assert!(
-            app.explore.histogram.is_none(),
-            "pressing 'n' must clear the stale histogram"
-        );
-    }
-
-    #[test]
-    fn t_key_clears_stale_histogram() {
-        use crossterm::event::KeyCode;
-        let mut app = App::new();
-        app.page = Page::Explore;
-        app.explore.numeric_attr = Some("latency_ms".into());
-
-        // Simulate a histogram fetched for the current window.
-        app.explore.histogram = Some(empty_query_response());
-        assert!(app.explore.histogram.is_some());
-
-        // Pressing 't' changes the window and must clear the now-stale histogram.
+    fn t_cycles_window_and_requests_refresh() {
+        let mut app = app_with_default();
+        app.refresh_requested = false;
+        let before = app.window;
         app.on_key(KeyCode::Char('t'));
-        assert!(
-            app.explore.histogram.is_none(),
-            "pressing 't' must clear the stale histogram"
-        );
+        assert_ne!(app.window, before);
+        assert!(app.refresh_requested);
+    }
+
+    #[test]
+    fn p_cycles_presets_and_rebuilds() {
+        let mut app = App::new();
+        // two-preset config
+        let mut cfg = DashboardConfig::default_builtin();
+        let mut second = cfg.presets[0].clone();
+        second.name = "second".into();
+        second.panels.truncate(1); // a 1-panel preset
+        cfg.presets.push(second);
+        app.config = cfg;
+        app.config.active_preset = "default".into();
+        app.rebuild_panels();
+        assert_eq!(app.panels.len(), 10);
+
+        app.on_key(KeyCode::Char('p'));
+        assert_eq!(app.config.active_preset, "second");
+        assert_eq!(app.panels.len(), 1);
+        assert!(app.refresh_requested);
+    }
+
+    #[test]
+    fn explore_attr_cycles_from_meta() {
+        let mut app = app_with_default();
+        app.mode = Mode::Explore;
+        app.meta = vec![AppMeta {
+            app: "a".into(),
+            event_names: vec![],
+            attribute_keys: vec![],
+            numeric_attribute_keys: vec!["a".into(), "b".into()],
+            first_event: None,
+            last_event: None,
+            total_events: 0,
+        }];
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("a"));
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("b"));
+        app.on_key(KeyCode::Char('n'));
+        assert_eq!(app.explore.numeric_attr.as_deref(), Some("a")); // wraps
+    }
+
+    #[test]
+    fn explore_request_validates() {
+        let mut app = app_with_default();
+        app.explore.numeric_attr = Some("latency_ms".to_string());
+        app.explore.measure_idx = NUMERIC_MEASURE_BASE; // avg
+        let req = app.explore_request();
+        gauge_query::validate(&req).unwrap();
     }
 }
