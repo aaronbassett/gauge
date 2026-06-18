@@ -343,17 +343,35 @@ sessions and agent conversations never break on the 1-hour token expiry.
 
 ### TUI
 
-Fixed pages, in the `btm`/`sampler` idiom:
+`gauge tui` opens a configurable, themed dashboard in the `btm`/`sampler` idiom.
 
-1. **Overview** — events-over-time braille chart, big-number tiles (events today;
-   unique installs 24h/7d/30d), top event types, an apps summary table.
-2. **App detail** (one page per app from `/v1/meta`) — event-type breakdown, version
-   distribution, os/arch split, per-event sparklines.
-3. **Explore** — an interactive query builder over the DSL.
+**Two modes** (`tab` toggles):
 
-Rendering is pure and decoupled from polling (default 30s; `r` forces a refresh), so
-a slow network never blocks the UI — failures degrade to a stale-data banner.
-Keys: `q` quit · `tab` switch page · `t` cycle time range · arrows navigate.
+- **Dashboard** — a grid of panels defined in `dashboard.toml`; presets switch whole
+  layouts.
+- **Explore** — an interactive query builder over the DSL.
+
+**Panels:** `timeseries`, `stat` (big number + Δ vs previous period + sparkline),
+`top_n`, `breakdown`, `numeric_stats`, `histogram`, and `apps_table`. The default
+layout shows activity over time, stat tiles, top events, a latency distribution, and
+OS/arch/version breakdowns.
+
+**Customize** via `~/.config/gauge/dashboard.toml` (theme, presets, panels, per-panel
+filter pins) and live in-app: `m` opens a menu to switch preset/theme/border/meter
+style and show/hide panels — changes persist back to the file.
+
+**Filter** the whole dashboard: `/` adds a filter (field → op → value, values
+suggested from `/v1/meta`), `c` clears. Filters cover `app`, `event_name`, `os`,
+`arch`, `app_version`, and any `attr.<key>` (`=`/`≠`/`in`/`exists`/`>`/`<`);
+`install_id`/`session_id` stay non-filterable for anonymity.
+
+**Themes:** Tokyo Night (default), Catppuccin Mocha, Gruvbox Dark, Nord, plus `ansi`
+(inherits your terminal's 16 colours) and custom palettes in config.
+
+Rendering is pure and decoupled from polling (default 30s; `r` forces a refresh), so a
+slow network never blocks the UI — failures degrade to a stale-data banner. Keys:
+`q` quit · `tab` mode · `t` time range · `p` preset · `/` filter · `c` clear · `m` menu
+· arrows navigate.
 
 ### MCP server
 
