@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "gauge-auth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "gauge-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "clap",
@@ -843,7 +843,7 @@ dependencies = [
 
 [[package]]
 name = "gauge-events"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -858,7 +858,7 @@ dependencies = [
 
 [[package]]
 name = "gauge-query"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "schemars",
  "serde",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "gauge-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64",
@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "gauge-telemetry"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gauge-events",
  "insta",
