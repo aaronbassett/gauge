@@ -54,7 +54,14 @@ impl Panel for Breakdown {
         vec![LabeledRequest::new(self.request(ctx))]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, ctx: &PanelCtx, results: &ResultMap, theme: &Theme) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        ctx: &PanelCtx,
+        results: &ResultMap,
+        theme: &Theme,
+    ) {
         let block = panel_block(&self.title, theme);
         let reqs = self.data_requests(ctx);
         let Some(resp) = nth_response(&reqs, 0, results) else {
@@ -80,7 +87,10 @@ impl Panel for Breakdown {
                         format!("{label:<10} "),
                         Style::default().fg(theme.palette.text),
                     ),
-                    Span::styled(format!("{pct:>4.0}%"), Style::default().fg(accent(theme, i))),
+                    Span::styled(
+                        format!("{pct:>4.0}%"),
+                        Style::default().fg(accent(theme, i)),
+                    ),
                 ])
             })
             .collect();

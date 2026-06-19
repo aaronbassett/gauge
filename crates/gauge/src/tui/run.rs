@@ -80,7 +80,9 @@ async fn event_loop(
                 let tx2 = tx.clone();
                 let w = app.window;
                 tokio::spawn(async move {
-                    let r = fetch_histogram(&api2, w, &key).await.map_err(|e| e.to_string());
+                    let r = fetch_histogram(&api2, w, &key)
+                        .await
+                        .map_err(|e| e.to_string());
                     let _ = tx2.send(Msg::Histogram(r)).await;
                 });
             }

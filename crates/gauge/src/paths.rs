@@ -40,7 +40,10 @@ mod tests {
         unsafe { std::env::set_var("GAUGE_CONFIG_DIR", "/tmp/gauge-test-cfg") };
         let p = dashboard_path().unwrap();
         assert!(p.ends_with("dashboard.toml"));
-        assert_eq!(p.parent().unwrap(), config_path().unwrap().parent().unwrap());
+        assert_eq!(
+            p.parent().unwrap(),
+            config_path().unwrap().parent().unwrap()
+        );
         unsafe { std::env::remove_var("GAUGE_CONFIG_DIR") };
     }
 }

@@ -278,7 +278,12 @@ mod dash_tests {
             if matches!(&r.time_range, TimeRange::Last { last } if last == "boom") {
                 return Err("kaboom".into());
             }
-            Ok(QueryResponse { rows: vec![], truncated: false, elapsed_ms: 0, meta: None })
+            Ok(QueryResponse {
+                rows: vec![],
+                truncated: false,
+                elapsed_ms: 0,
+                meta: None,
+            })
         }
     }
 
@@ -288,13 +293,20 @@ mod dash_tests {
             Box::new(FakePanel(vec![req("1d"), req("7d")])),
             Box::new(FakePanel(vec![req("1d")])),
         ];
-        let ctx = PanelCtx { window: TimeWindow::D7, filters: &[], meta: &[] };
+        let ctx = PanelCtx {
+            window: TimeWindow::D7,
+            filters: &[],
+            meta: &[],
+        };
         assert_eq!(collect_requests(&panels, &ctx).len(), 2);
     }
 
     #[tokio::test]
     async fn fetch_all_maps_results_and_errors_by_key() {
-        let reqs = vec![LabeledRequest::new(req("1d")), LabeledRequest::new(req("boom"))];
+        let reqs = vec![
+            LabeledRequest::new(req("1d")),
+            LabeledRequest::new(req("boom")),
+        ];
         let map = fetch_all(&FakeSource, reqs.clone()).await;
         assert_eq!(map.len(), 2);
         assert!(map.get(&reqs[0].key).unwrap().is_ok());

@@ -63,7 +63,14 @@ impl Panel for Histogram {
             .collect()
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, ctx: &PanelCtx, results: &ResultMap, theme: &Theme) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        ctx: &PanelCtx,
+        results: &ResultMap,
+        theme: &Theme,
+    ) {
         let block = panel_block(&self.title, theme);
         let reqs = self.data_requests(ctx);
         let Some(resp) = nth_response(&reqs, 0, results) else {

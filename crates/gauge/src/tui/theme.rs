@@ -153,7 +153,10 @@ mod tests {
 
     #[test]
     fn hex_parses_and_rejects() {
-        assert_eq!(parse_hex_color("#1a1b26"), Some(Color::Rgb(0x1a, 0x1b, 0x26)));
+        assert_eq!(
+            parse_hex_color("#1a1b26"),
+            Some(Color::Rgb(0x1a, 0x1b, 0x26))
+        );
         assert_eq!(parse_hex_color("#FFFFFF"), Some(Color::Rgb(255, 255, 255)));
         assert_eq!(parse_hex_color("1a1b26"), None);
         assert_eq!(parse_hex_color("#abc"), None);
@@ -176,7 +179,13 @@ mod tests {
 
     #[test]
     fn all_named_builtins_resolve() {
-        for name in ["tokyo-night", "catppuccin-mocha", "gruvbox-dark", "nord", "ansi"] {
+        for name in [
+            "tokyo-night",
+            "catppuccin-mocha",
+            "gruvbox-dark",
+            "nord",
+            "ansi",
+        ] {
             let p = builtin_palette(name).unwrap_or_else(|| panic!("{name} missing"));
             assert!(p.accents.len() >= 2, "{name} needs >=2 accents");
         }

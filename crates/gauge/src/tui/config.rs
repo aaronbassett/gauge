@@ -545,7 +545,10 @@ name = "default"
         assert_eq!(theme.name, "nord");
         assert_eq!(theme.border, BorderStyle::Square);
         assert_eq!(theme.meter, MeterStyle::Solid);
-        assert_eq!(theme.palette.bg, ratatui::style::Color::Rgb(0x2e, 0x34, 0x40));
+        assert_eq!(
+            theme.palette.bg,
+            ratatui::style::Color::Rgb(0x2e, 0x34, 0x40)
+        );
     }
 
     #[test]
@@ -554,7 +557,10 @@ name = "default"
         cfg.theme.name = "totally-unknown".into();
         let theme = cfg.resolve_theme();
         // palette falls back to tokyo-night even though the stored name is preserved
-        assert_eq!(theme.palette.down, ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e));
+        assert_eq!(
+            theme.palette.down,
+            ratatui::style::Color::Rgb(0xf7, 0x76, 0x8e)
+        );
     }
 
     #[test]
@@ -568,7 +574,10 @@ name = "default"
         let theme = cfg.resolve_theme();
         assert_eq!(theme.palette.bg, ratatui::style::Color::Rgb(0, 0, 0));
         // base tokyo-night text retained because the override was invalid
-        assert_eq!(theme.palette.text, ratatui::style::Color::Rgb(0xc0, 0xca, 0xf5));
+        assert_eq!(
+            theme.palette.text,
+            ratatui::style::Color::Rgb(0xc0, 0xca, 0xf5)
+        );
     }
 
     #[test]

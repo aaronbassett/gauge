@@ -51,7 +51,14 @@ impl Panel for AppsTable {
         vec![LabeledRequest::new(self.request(ctx))]
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, ctx: &PanelCtx, results: &ResultMap, theme: &Theme) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        ctx: &PanelCtx,
+        results: &ResultMap,
+        theme: &Theme,
+    ) {
         let block = panel_block(&self.title, theme);
         let reqs = self.data_requests(ctx);
         let Some(resp) = nth_response(&reqs, 0, results) else {
@@ -80,8 +87,11 @@ impl Panel for AppsTable {
             ],
         )
         .header(
-            Row::new(vec!["app", "events", "installs", "sessions"])
-                .style(Style::default().fg(theme.palette.muted).add_modifier(Modifier::BOLD)),
+            Row::new(vec!["app", "events", "installs", "sessions"]).style(
+                Style::default()
+                    .fg(theme.palette.muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
         )
         .style(Style::default().fg(theme.palette.text))
         .block(block);

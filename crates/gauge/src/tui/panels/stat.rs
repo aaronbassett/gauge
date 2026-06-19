@@ -75,7 +75,14 @@ impl Panel for Stat {
         }
     }
 
-    fn render(&self, f: &mut Frame, area: Rect, ctx: &PanelCtx, results: &ResultMap, theme: &Theme) {
+    fn render(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        ctx: &PanelCtx,
+        results: &ResultMap,
+        theme: &Theme,
+    ) {
         let block = panel_block(&self.title, theme);
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -178,7 +185,9 @@ impl Panel for Stat {
 }
 
 fn first_number(row: &serde_json::Value) -> Option<f64> {
-    row.as_object()?.values().find_map(serde_json::Value::as_f64)
+    row.as_object()?
+        .values()
+        .find_map(serde_json::Value::as_f64)
 }
 
 fn human(v: f64) -> String {

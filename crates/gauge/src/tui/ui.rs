@@ -21,7 +21,11 @@ pub fn render(f: &mut Frame, app: &App) {
     );
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(area);
     render_top_bar(f, app, chunks[0]);
     match app.mode {
@@ -53,7 +57,9 @@ fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(
             format!("  ▸ {mode}"),
-            Style::default().fg(t.palette.text).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(t.palette.text)
+                .add_modifier(Modifier::BOLD),
         ),
     ];
     if app.mode == Mode::Dashboard {
@@ -67,7 +73,10 @@ fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(t.palette.accents[1 % t.palette.accents.len().max(1)]),
     ));
 
-    let mut line2: Vec<Span> = vec![Span::styled(" filters: ", Style::default().fg(t.palette.muted))];
+    let mut line2: Vec<Span> = vec![Span::styled(
+        " filters: ",
+        Style::default().fg(t.palette.muted),
+    )];
     if app.filters.is_empty() {
         line2.push(Span::styled("(none)", Style::default().fg(t.palette.muted)));
     } else {
@@ -88,7 +97,9 @@ fn render_top_bar(f: &mut Frame, app: &App, area: Rect) {
     {
         line2.push(Span::styled(
             format!("   ⚠ {banner}"),
-            Style::default().fg(t.palette.down).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(t.palette.down)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -149,8 +160,12 @@ fn render_dashboard(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_status_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = match app.mode {
-        Mode::Dashboard => "tab:explore   /:filter   c:clear   m:menu   p:preset   t:range   q:quit",
-        Mode::Explore => "tab:dashboard   ↑:measure   ↓:dim   n:attr   enter:run   h:hist   t:range   q:quit",
+        Mode::Dashboard => {
+            "tab:explore   /:filter   c:clear   m:menu   p:preset   t:range   q:quit"
+        }
+        Mode::Explore => {
+            "tab:dashboard   ↑:measure   ↓:dim   n:attr   enter:run   h:hist   t:range   q:quit"
+        }
     };
     f.render_widget(
         Paragraph::new(Span::styled(
@@ -172,9 +187,15 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
     let needs_attr =
         app.explore.measure_idx >= NUMERIC_MEASURE_BASE && app.explore.numeric_attr.is_none();
     let attr_display = if needs_attr {
-        format!("(none — pick one to run {})", EXPLORE_MEASURES[app.explore.measure_idx])
+        format!(
+            "(none — pick one to run {})",
+            EXPLORE_MEASURES[app.explore.measure_idx]
+        )
     } else {
-        app.explore.numeric_attr.clone().unwrap_or_else(|| "(none)".into())
+        app.explore
+            .numeric_attr
+            .clone()
+            .unwrap_or_else(|| "(none)".into())
     };
     let picker = Paragraph::new(format!(
         "measure (↑): {}    dimension (↓): {}    attr (n): {}    enter: run",
@@ -189,7 +210,10 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
     if let Some(hist) = &app.explore.histogram {
         let block = panel_block("Histogram (h to refresh)", t);
         if hist.rows.is_empty() {
-            f.render_widget(Paragraph::new("no data for this attribute").block(block), chunks[1]);
+            f.render_widget(
+                Paragraph::new("no data for this attribute").block(block),
+                chunks[1],
+            );
             return;
         }
         let attr_alias = app
@@ -204,7 +228,13 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
             .enumerate()
             .map(|(i, r)| {
                 Bar::default()
-                    .label(r[attr_alias.as_str()].as_str().unwrap_or("?").to_string().into())
+                    .label(
+                        r[attr_alias.as_str()]
+                            .as_str()
+                            .unwrap_or("?")
+                            .to_string()
+                            .into(),
+                    )
                     .value(r["count"].as_i64().unwrap_or(0) as u64)
                     .style(Style::default().fg(crate::tui::panels::accent(t, i)))
             })
@@ -233,7 +263,9 @@ fn render_explore(f: &mut Frame, app: &App, area: Rect) {
                 .map(|r| Line::from(serde_json::to_string(r).unwrap_or_default()))
                 .collect();
             f.render_widget(
-                Paragraph::new(lines).style(Style::default().fg(t.palette.text)).block(block),
+                Paragraph::new(lines)
+                    .style(Style::default().fg(t.palette.text))
+                    .block(block),
                 chunks[1],
             );
         }
@@ -272,7 +304,9 @@ fn list_lines<'a>(
 ) {
     for (i, item) in items.iter().enumerate() {
         let style = if i == selected {
-            Style::default().fg(theme.palette.bg).bg(theme.palette.accents[0])
+            Style::default()
+                .fg(theme.palette.bg)
+                .bg(theme.palette.accents[0])
         } else {
             Style::default().fg(theme.palette.text)
         };
@@ -308,7 +342,9 @@ fn render_filter_overlay(f: &mut Frame, app: &App, area: Rect) {
         FilterStep::Value => {
             lines.push(Line::from(Span::styled(
                 format!(" value: {}", d.buffer),
-                Style::default().fg(t.palette.text).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(t.palette.text)
+                    .add_modifier(Modifier::BOLD),
             )));
             if !d.values.is_empty() {
                 lines.push(Line::from(Span::styled(

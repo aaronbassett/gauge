@@ -42,8 +42,13 @@ pub struct MenuState {
     pub focus: usize,
 }
 
-pub const BUILTIN_THEMES: &[&str] =
-    &["tokyo-night", "catppuccin-mocha", "gruvbox-dark", "nord", "ansi"];
+pub const BUILTIN_THEMES: &[&str] = &[
+    "tokyo-night",
+    "catppuccin-mocha",
+    "gruvbox-dark",
+    "nord",
+    "ansi",
+];
 
 pub const EXPLORE_MEASURES: &[&str] = &[
     "count",
@@ -180,7 +185,10 @@ impl App {
     }
 
     fn menu_panel_count(&self) -> usize {
-        self.config.active_preset().map(|p| p.panels.len()).unwrap_or(0)
+        self.config
+            .active_preset()
+            .map(|p| p.panels.len())
+            .unwrap_or(0)
     }
 
     fn menu_rows(&self) -> usize {
@@ -189,11 +197,13 @@ impl App {
 
     fn active_preset_index(&self) -> Option<usize> {
         let name = &self.config.active_preset;
-        self.config
-            .presets
-            .iter()
-            .position(|p| p.name == *name)
-            .or(if self.config.presets.is_empty() { None } else { Some(0) })
+        self.config.presets.iter().position(|p| p.name == *name).or(
+            if self.config.presets.is_empty() {
+                None
+            } else {
+                Some(0)
+            },
+        )
     }
 
     /// After any config mutation: rebuild panels, mark dirty (run loop persists), refresh.
@@ -205,8 +215,15 @@ impl App {
 
     fn cycle_theme(&mut self, forward: bool) {
         let n = BUILTIN_THEMES.len();
-        let cur = BUILTIN_THEMES.iter().position(|t| *t == self.config.theme.name).unwrap_or(0);
-        let next = if forward { (cur + 1) % n } else { (cur + n - 1) % n };
+        let cur = BUILTIN_THEMES
+            .iter()
+            .position(|t| *t == self.config.theme.name)
+            .unwrap_or(0);
+        let next = if forward {
+            (cur + 1) % n
+        } else {
+            (cur + n - 1) % n
+        };
         self.config.theme.name = BUILTIN_THEMES[next].to_string();
         self.after_config_change();
     }
@@ -217,8 +234,15 @@ impl App {
             return;
         }
         let n = names.len();
-        let cur = names.iter().position(|x| *x == self.config.active_preset).unwrap_or(0);
-        let next = if forward { (cur + 1) % n } else { (cur + n - 1) % n };
+        let cur = names
+            .iter()
+            .position(|x| *x == self.config.active_preset)
+            .unwrap_or(0);
+        let next = if forward {
+            (cur + 1) % n
+        } else {
+            (cur + n - 1) % n
+        };
         self.config.active_preset = names[next].clone();
         self.after_config_change();
     }
@@ -588,7 +612,11 @@ impl App {
     pub fn explore_request(&self) -> QueryRequest {
         let measure = EXPLORE_MEASURES[self.explore.measure_idx];
         let measures: Vec<serde_json::Value> = if self.explore.measure_idx >= NUMERIC_MEASURE_BASE {
-            let field_str = self.explore.numeric_attr.as_deref().map(|k| format!("attr.{k}"));
+            let field_str = self
+                .explore
+                .numeric_attr
+                .as_deref()
+                .map(|k| format!("attr.{k}"));
             let field_ok = field_str
                 .as_deref()
                 .map(|s| gauge_query::Field::parse(s).is_ok())
@@ -642,7 +670,11 @@ mod tests {
         let fields = app.filter_fields();
         assert!(fields.contains(&"app".to_string()));
         assert!(fields.contains(&"attr.latency_ms".to_string()));
-        assert!(!fields.iter().any(|f| f == "install_id" || f == "session_id"));
+        assert!(
+            !fields
+                .iter()
+                .any(|f| f == "install_id" || f == "session_id")
+        );
     }
 
     #[test]
@@ -709,7 +741,9 @@ mod tests {
         app.on_key(KeyCode::Enter);
         assert_eq!(app.filters.len(), 1);
         assert_eq!(app.filters[0].op, FilterOp::Gt);
-        assert!(matches!(app.filters[0].value, Some(FilterValue::Num(n)) if (n - 100.0).abs() < 1e-9));
+        assert!(
+            matches!(app.filters[0].value, Some(FilterValue::Num(n)) if (n - 100.0).abs() < 1e-9)
+        );
     }
 
     #[test]
