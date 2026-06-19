@@ -1,8 +1,6 @@
 use gauge_query::{
-    AppMeta, BucketSpec, Dimension, Dir, Field, Granularity, Measure, Order, QueryRequest,
-    QueryResponse, TimeRange,
+    BucketSpec, Dimension, Field, Granularity, Measure, QueryRequest, QueryResponse, TimeRange,
 };
-use time::OffsetDateTime;
 
 use crate::api::ApiClient;
 use crate::error::ClientError;
@@ -32,6 +30,15 @@ impl TimeWindow {
             Self::D30 => "30d",
         }
     }
+    /// The relative range string for twice this window (for current-vs-previous deltas).
+    pub fn doubled_last(&self) -> &'static str {
+        match self {
+            Self::H1 => "2h",
+            Self::H24 => "48h",
+            Self::D7 => "14d",
+            Self::D30 => "60d",
+        }
+    }
     pub fn granularity(&self) -> Granularity {
         match self {
             Self::H1 | Self::H24 => Granularity::Hour,
@@ -48,19 +55,6 @@ impl TimeWindow {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Snapshot {
-    pub fetched_at: OffsetDateTime,
-    pub window: TimeWindow,
-    /// rows: {time_bucket, app, count}
-    pub timeseries: Vec<serde_json::Value>,
-    /// rows: {app, count, unique_installs, unique_sessions}
-    pub totals: Vec<serde_json::Value>,
-    /// rows: {event_name, count}
-    pub top_events: Vec<serde_json::Value>,
-    pub apps: Vec<AppMeta>,
-}
-
 fn base(w: TimeWindow) -> QueryRequest {
     QueryRequest {
         measures: vec![Measure::Count],
@@ -73,54 +67,6 @@ fn base(w: TimeWindow) -> QueryRequest {
         order: vec![],
         limit: None,
     }
-}
-
-pub async fn fetch(api: &ApiClient, w: TimeWindow) -> Result<Snapshot, ClientError> {
-    let timeseries = api
-        .query(&QueryRequest {
-            dimensions: vec![Dimension::Field(Field::App)],
-            granularity: Some(w.granularity()),
-            ..base(w)
-        })
-        .await?
-        .rows;
-    let totals = api
-        .query(&QueryRequest {
-            measures: vec![
-                Measure::Count,
-                Measure::UniqueInstalls,
-                Measure::UniqueSessions,
-            ],
-            dimensions: vec![Dimension::Field(Field::App)],
-            order: vec![Order {
-                field: "app".into(),
-                dir: Dir::Asc,
-            }],
-            ..base(w)
-        })
-        .await?
-        .rows;
-    let top_events = api
-        .query(&QueryRequest {
-            dimensions: vec![Dimension::Field(Field::EventName)],
-            order: vec![Order {
-                field: "count".into(),
-                dir: Dir::Desc,
-            }],
-            limit: Some(10),
-            ..base(w)
-        })
-        .await?
-        .rows;
-    let apps = api.meta().await?.apps;
-    Ok(Snapshot {
-        fetched_at: OffsetDateTime::now_utc(),
-        window: w,
-        timeseries,
-        totals,
-        top_events,
-        apps,
-    })
 }
 
 /// Round x up to a "nice" 1/2/5×10ⁿ step (for readable histogram edges).
@@ -210,6 +156,45 @@ pub async fn fetch_histogram(
     api.query(&histogram_bucket_request(w, key, edges)).await
 }
 
+use crate::tui::panels::{LabeledRequest, Panel, PanelCtx, ResultMap};
+
+/// A source of query answers. `ApiClient` implements this against the server.
+pub trait QuerySource {
+    fn run(
+        &self,
+        req: &QueryRequest,
+    ) -> impl std::future::Future<Output = Result<QueryResponse, String>> + Send;
+}
+
+impl QuerySource for ApiClient {
+    async fn run(&self, req: &QueryRequest) -> Result<QueryResponse, String> {
+        self.query(req).await.map_err(|e| e.to_string())
+    }
+}
+
+/// Gather every visible panel's requests, deduplicated by key (first wins).
+pub fn collect_requests(panels: &[Box<dyn Panel>], ctx: &PanelCtx) -> Vec<LabeledRequest> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for panel in panels {
+        for lr in panel.data_requests(ctx) {
+            if seen.insert(lr.key.clone()) {
+                out.push(lr);
+            }
+        }
+    }
+    out
+}
+
+/// Run all requests concurrently, collecting them into a key→result map.
+pub async fn fetch_all<Q: QuerySource>(q: &Q, requests: Vec<LabeledRequest>) -> ResultMap {
+    let futs = requests.into_iter().map(|lr| async move {
+        let result = q.run(&lr.request).await;
+        (lr.key, result)
+    });
+    futures::future::join_all(futs).await.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +214,14 @@ mod tests {
     }
 
     #[test]
+    fn doubled_last_doubles_each_window() {
+        assert_eq!(TimeWindow::H1.doubled_last(), "2h");
+        assert_eq!(TimeWindow::H24.doubled_last(), "48h");
+        assert_eq!(TimeWindow::D7.doubled_last(), "14d");
+        assert_eq!(TimeWindow::D30.doubled_last(), "60d");
+    }
+
+    #[test]
     fn derive_edges_are_sorted_rounded_and_bounded() {
         let e = derive_edges(0.0, 1180.0);
         assert!(!e.is_empty() && e.len() <= 5);
@@ -239,5 +232,84 @@ mod tests {
         // degenerate range still yields a usable single split
         let d = derive_edges(5.0, 5.0);
         assert_eq!(d.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod dash_tests {
+    use super::*;
+    use crate::tui::panels::{LabeledRequest, Panel, PanelCtx, ResultMap};
+    use gauge_query::{QueryRequest, QueryResponse, TimeRange};
+
+    fn req(last: &str) -> QueryRequest {
+        QueryRequest {
+            measures: vec![gauge_query::Measure::Count],
+            dimensions: vec![],
+            filters: vec![],
+            time_range: TimeRange::Last { last: last.into() },
+            granularity: None,
+            order: vec![],
+            limit: None,
+        }
+    }
+
+    struct FakePanel(Vec<QueryRequest>);
+    impl Panel for FakePanel {
+        fn title(&self) -> String {
+            "fake".into()
+        }
+        fn data_requests(&self, _c: &PanelCtx) -> Vec<LabeledRequest> {
+            self.0.iter().cloned().map(LabeledRequest::new).collect()
+        }
+        fn render(
+            &self,
+            _f: &mut ratatui::Frame,
+            _a: ratatui::layout::Rect,
+            _c: &PanelCtx,
+            _r: &ResultMap,
+            _t: &crate::tui::theme::Theme,
+        ) {
+        }
+    }
+
+    struct FakeSource;
+    impl QuerySource for FakeSource {
+        async fn run(&self, r: &QueryRequest) -> Result<QueryResponse, String> {
+            if matches!(&r.time_range, TimeRange::Last { last } if last == "boom") {
+                return Err("kaboom".into());
+            }
+            Ok(QueryResponse {
+                rows: vec![],
+                truncated: false,
+                elapsed_ms: 0,
+                meta: None,
+            })
+        }
+    }
+
+    #[test]
+    fn collect_requests_dedupes_identical_queries() {
+        let panels: Vec<Box<dyn Panel>> = vec![
+            Box::new(FakePanel(vec![req("1d"), req("7d")])),
+            Box::new(FakePanel(vec![req("1d")])),
+        ];
+        let ctx = PanelCtx {
+            window: TimeWindow::D7,
+            filters: &[],
+            meta: &[],
+        };
+        assert_eq!(collect_requests(&panels, &ctx).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_all_maps_results_and_errors_by_key() {
+        let reqs = vec![
+            LabeledRequest::new(req("1d")),
+            LabeledRequest::new(req("boom")),
+        ];
+        let map = fetch_all(&FakeSource, reqs.clone()).await;
+        assert_eq!(map.len(), 2);
+        assert!(map.get(&reqs[0].key).unwrap().is_ok());
+        assert!(map.get(&reqs[1].key).unwrap().is_err());
     }
 }
