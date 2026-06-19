@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.93"
@@ -23,9 +23,9 @@ authors = ["Aaron Bassett <aaronbassett@gmail.com>"]
 # dependency is rejected by the registry; cargo strips `path` at publish time
 # and keeps `version`). release-plz keeps these versions in lockstep with the
 # shared workspace package version.
-gauge-auth = { path = "crates/gauge-auth", version = "0.2.0" }
-gauge-events = { path = "crates/gauge-events", version = "0.2.0" }
-gauge-query = { path = "crates/gauge-query", version = "0.2.0" }
+gauge-auth = { path = "crates/gauge-auth", version = "0.3.0" }
+gauge-events = { path = "crates/gauge-events", version = "0.3.0" }
+gauge-query = { path = "crates/gauge-query", version = "0.3.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
