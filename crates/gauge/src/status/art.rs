@@ -15,9 +15,9 @@ pub const ART_WIDTH: usize = INTERIOR + 2;
 // Wave rows. Exact source spacing is forgiving — `fit` pads/truncates each to
 // INTERIOR before framing. Tune visually; widths are normalised in code.
 const ROWS: [&str; 3] = [
-    "        ╱╲    ╱╲        ",
-    "  ╱╲╱╲╱   ╲╱╲╱   ╲╱╲    ",
-    " ╱╲              ╲╱╲    ",
+    "        ╱╲    ╱╲       ",
+    "  ╱╲╱╲╱   ╲╱╲╱   ╲╱╲   ",
+    " ╱╲              ╲╱╲   ",
 ];
 
 /// Pad (with spaces) or truncate `row` to exactly `INTERIOR` visible chars.
@@ -93,6 +93,17 @@ mod tests {
         assert_eq!(lines.len(), 5, "top + 3 wave rows + bottom");
         for l in &lines {
             assert_eq!(l.chars().count(), ART_WIDTH, "line {l:?} not ART_WIDTH wide");
+        }
+    }
+
+    #[test]
+    fn rows_are_exactly_interior_wide() {
+        for row in ROWS {
+            assert_eq!(
+                row.chars().count(),
+                INTERIOR,
+                "ROWS literal must be INTERIOR-wide: {row:?}"
+            );
         }
     }
 
