@@ -2,6 +2,7 @@
 
 pub mod art;
 
+use std::io::Write as _;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -11,6 +12,7 @@ use crate::api::{ApiClient, TokenCache};
 use crate::config::ClientConfig;
 use crate::error::ClientError;
 use crate::paths;
+use crate::term;
 
 // ---- Report data model -----------------------------------------------------
 
@@ -42,7 +44,12 @@ pub struct TokenStatus {
 
 impl TokenStatus {
     fn absent() -> Self {
-        Self { present: false, valid: false, expires_at: None, expires_in_secs: None }
+        Self {
+            present: false,
+            valid: false,
+            expires_at: None,
+            expires_in_secs: None,
+        }
     }
 }
 
@@ -138,7 +145,13 @@ pub async fn assemble_report(config: Result<ClientConfig, ClientError>) -> Statu
                 error: Some("client not configured".into()),
             };
             let data = DataStatus::unavailable("client not configured");
-            return StatusReport { gauge, client, server, data, overall: Overall::Unhealthy };
+            return StatusReport {
+                gauge,
+                client,
+                server,
+                data,
+                overall: Overall::Unhealthy,
+            };
         }
     };
 
@@ -174,7 +187,13 @@ pub async fn assemble_report(config: Result<ClientConfig, ClientError>) -> Statu
         token,
     };
     let overall = classify(true, &server, &data);
-    StatusReport { gauge, client, server, data, overall }
+    StatusReport {
+        gauge,
+        client,
+        server,
+        data,
+        overall,
+    }
 }
 
 /// `healthz` then `readyz`. Returns `(reachable, db_ready, error)`.
@@ -235,24 +254,320 @@ fn classify(config_loaded: bool, server: &ServerStatus, data: &DataStatus) -> Ov
     Overall::Healthy
 }
 
+// ---- Output ----------------------------------------------------------------
+
+/// Emit the report: compact JSON when `json`, else the art+panel human view.
+pub fn emit(report: &StatusReport, json: bool) {
+    if json {
+        let body = serde_json::to_string(report).unwrap_or_else(|_| "{}".to_string());
+        println!("{body}");
+    } else {
+        emit_human(report);
+    }
+}
+
+fn ok_mark() -> String {
+    if term::color_enabled() {
+        term::green("✓")
+    } else {
+        "[ok]".to_string()
+    }
+}
+fn warn_mark() -> String {
+    if term::color_enabled() {
+        term::yellow("⚠")
+    } else {
+        "[warn]".to_string()
+    }
+}
+fn fail_mark() -> String {
+    if term::color_enabled() {
+        term::red("✗")
+    } else {
+        "[fail]".to_string()
+    }
+}
+
+fn token_line(t: &TokenStatus) -> String {
+    if !t.present {
+        return format!("{} none cached", fail_mark());
+    }
+    if t.valid {
+        format!(
+            "{} valid · expires in {}",
+            ok_mark(),
+            human_duration(t.expires_in_secs.unwrap_or(0))
+        )
+    } else {
+        let expired = t.expires_in_secs.map(|s| s <= 0).unwrap_or(true);
+        format!(
+            "{} {}",
+            warn_mark(),
+            if expired { "expired" } else { "stale" }
+        )
+    }
+}
+
+fn reachable_line(s: &ServerStatus) -> String {
+    if !s.reachable {
+        return format!(
+            "{} unreachable ({})",
+            fail_mark(),
+            s.error.as_deref().unwrap_or("no response")
+        );
+    }
+    let db = if s.db_ready {
+        format!("{} ready", ok_mark())
+    } else {
+        format!("{} not ready", fail_mark())
+    };
+    format!("{} ok · DB {}", ok_mark(), db)
+}
+
+fn overall_line(o: &Overall) -> String {
+    match o {
+        Overall::Healthy => format!("{} healthy", ok_mark()),
+        Overall::Degraded => format!("{} degraded", warn_mark()),
+        Overall::Unhealthy => format!("{} unhealthy", fail_mark()),
+    }
+}
+
+fn collapse_home(path: &str) -> String {
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+        && path.starts_with(&home)
+    {
+        return path.replacen(&home, "~", 1);
+    }
+    path.to_string()
+}
+
+fn rel_from_rfc3339(s: &str) -> String {
+    match OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339) {
+        Ok(dt) => relative_time(
+            dt.unix_timestamp(),
+            OffsetDateTime::now_utc().unix_timestamp(),
+        ),
+        Err(_) => s.to_string(),
+    }
+}
+
+// ---- Humanizers (deferred from Task 4 — land with their first consumer) -----
+
+fn human_count(n: i64) -> String {
+    let v = n as f64;
+    if v < 1_000.0 {
+        return n.to_string();
+    }
+    let trim = |x: f64, suf: &str| {
+        if x.fract().abs() < 0.05 {
+            format!("{}{suf}", x.round() as i64)
+        } else {
+            format!("{x:.1}{suf}")
+        }
+    };
+    if v < 1_000_000.0 {
+        trim(v / 1_000.0, "K")
+    } else if v < 1_000_000_000.0 {
+        trim(v / 1_000_000.0, "M")
+    } else {
+        trim(v / 1_000_000_000.0, "B")
+    }
+}
+
+fn human_duration(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3_600 {
+        format!("{}m", s / 60)
+    } else if s < 86_400 {
+        format!("{}h", s / 3_600)
+    } else {
+        format!("{}d", s / 86_400)
+    }
+}
+
+fn relative_time(then: i64, now: i64) -> String {
+    let d = (now - then).max(0);
+    let plural = |n: i64| if n == 1 { "" } else { "s" };
+    if d < 60 {
+        "just now".to_string()
+    } else if d < 3_600 {
+        let m = d / 60;
+        format!("{m} minute{} ago", plural(m))
+    } else if d < 86_400 {
+        let h = d / 3_600;
+        format!("{h} hour{} ago", plural(h))
+    } else {
+        let days = d / 86_400;
+        format!("{days} day{} ago", plural(days))
+    }
+}
+
+/// The right-hand info panel as plain/colored lines (colour auto-off when not a
+/// TTY, yielding the plain rendering used by tests and pipes).
+fn human_panel(r: &StatusReport) -> Vec<String> {
+    let key = |k: &str| term::label(&format!("{k:<12}"));
+    let dash = "—".to_string();
+
+    let mut lines = Vec::new();
+    lines.push(term::bold(&format!("Gauge v{}", r.gauge)));
+    lines.push(String::new());
+
+    lines.push(term::dim("Client"));
+    let config_val = if r.client.config_loaded {
+        collapse_home(&r.client.config_path)
+    } else {
+        format!("missing ({})", collapse_home(&r.client.config_path))
+    };
+    lines.push(format!("{} {}", key("Config:"), config_val));
+    lines.push(format!(
+        "{} {}",
+        key("User:"),
+        if r.client.user_id.is_empty() {
+            dash.clone()
+        } else {
+            r.client.user_id.clone()
+        }
+    ));
+    lines.push(format!(
+        "{} {}",
+        key("Key:"),
+        if r.client.key_present {
+            format!("{} present", ok_mark())
+        } else {
+            format!("{} missing", fail_mark())
+        }
+    ));
+    lines.push(format!("{} {}", key("Token:"), token_line(&r.client.token)));
+    lines.push(String::new());
+
+    lines.push(term::dim("Server"));
+    lines.push(format!(
+        "{} {}",
+        key("Endpoint:"),
+        if r.client.server_url.is_empty() {
+            dash.clone()
+        } else {
+            r.client.server_url.clone()
+        }
+    ));
+    lines.push(format!(
+        "{} {}",
+        key("Reachable:"),
+        reachable_line(&r.server)
+    ));
+    if r.data.available {
+        lines.push(format!(
+            "{} {} · {} events",
+            key("Apps:"),
+            r.data.apps,
+            human_count(r.data.total_events)
+        ));
+        lines.push(format!(
+            "{} {}",
+            key("Latest:"),
+            r.data
+                .last_event
+                .as_deref()
+                .map(rel_from_rfc3339)
+                .unwrap_or(dash)
+        ));
+    } else {
+        lines.push(format!(
+            "{} {} {}",
+            key("Data:"),
+            warn_mark(),
+            r.data.error.as_deref().unwrap_or("unavailable")
+        ));
+    }
+    lines.push(String::new());
+
+    lines.push(format!("{} {}", key("Overall:"), overall_line(&r.overall)));
+    lines
+}
+
+fn emit_human(report: &StatusReport) {
+    let mut out = std::io::stdout().lock();
+    let panel = human_panel(report);
+
+    // Sparkline colours reuse the same palette `gauge tui` resolves (default
+    // tokyo-night, honouring a custom dashboard.toml). `load` never errors —
+    // it falls back to the built-in default config.
+    let accents = crate::tui::config::load().0.resolve_theme().palette.accents;
+
+    const GAP: usize = 3;
+    const PANEL_MIN: usize = 34;
+    let show_art = term::stdout_is_tty() && term::term_width() >= art::ART_WIDTH + GAP + PANEL_MIN;
+
+    if !show_art {
+        for line in &panel {
+            let _ = writeln!(out, "{line}");
+        }
+        return;
+    }
+
+    let art = art::sparkline(&accents);
+    let blank = " ".repeat(art::ART_WIDTH);
+    let gap = " ".repeat(GAP);
+    let rows = art.len().max(panel.len());
+    for i in 0..rows {
+        let left = art.get(i).map(String::as_str).unwrap_or(&blank);
+        let right = panel.get(i).map(String::as_str).unwrap_or("");
+        if right.is_empty() {
+            let _ = writeln!(out, "{}", left.trim_end());
+        } else {
+            let _ = writeln!(out, "{left}{gap}{right}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn srv(reachable: bool, db_ready: bool) -> ServerStatus {
-        ServerStatus { endpoint: "u".into(), reachable, db_ready, error: None }
+        ServerStatus {
+            endpoint: "u".into(),
+            reachable,
+            db_ready,
+            error: None,
+        }
     }
     fn data(available: bool) -> DataStatus {
-        DataStatus { available, apps: 0, total_events: 0, last_event: None, per_app: vec![], error: None }
+        DataStatus {
+            available,
+            apps: 0,
+            total_events: 0,
+            last_event: None,
+            per_app: vec![],
+            error: None,
+        }
     }
 
     #[test]
     fn classify_truth_table() {
-        assert_eq!(classify(true, &srv(true, true), &data(true)), Overall::Healthy);
-        assert_eq!(classify(true, &srv(true, true), &data(false)), Overall::Degraded);
-        assert_eq!(classify(true, &srv(true, false), &data(true)), Overall::Unhealthy);
-        assert_eq!(classify(true, &srv(false, false), &data(false)), Overall::Unhealthy);
-        assert_eq!(classify(false, &srv(false, false), &data(false)), Overall::Unhealthy);
+        assert_eq!(
+            classify(true, &srv(true, true), &data(true)),
+            Overall::Healthy
+        );
+        assert_eq!(
+            classify(true, &srv(true, true), &data(false)),
+            Overall::Degraded
+        );
+        assert_eq!(
+            classify(true, &srv(true, false), &data(true)),
+            Overall::Unhealthy
+        );
+        assert_eq!(
+            classify(true, &srv(false, false), &data(false)),
+            Overall::Unhealthy
+        );
+        assert_eq!(
+            classify(false, &srv(false, false), &data(false)),
+            Overall::Unhealthy
+        );
     }
 
     #[test]
@@ -269,5 +584,89 @@ mod tests {
         assert!(!report.client.config_loaded);
         assert!(!report.server.reachable);
         assert!(!report.data.available);
+    }
+
+    fn healthy_report() -> StatusReport {
+        StatusReport {
+            gauge: "9.9.9".into(),
+            client: ClientStatus {
+                config_path: "/home/x/.config/gauge/config.toml".into(),
+                config_loaded: true,
+                server_url: "https://gauge.example".into(),
+                user_id: "aaron".into(),
+                key_present: true,
+                token: TokenStatus {
+                    present: true,
+                    valid: true,
+                    expires_at: Some(10),
+                    expires_in_secs: Some(2_460),
+                },
+            },
+            server: ServerStatus {
+                endpoint: "https://gauge.example".into(),
+                reachable: true,
+                db_ready: true,
+                error: None,
+            },
+            data: DataStatus {
+                available: true,
+                apps: 3,
+                total_events: 1_200_000,
+                last_event: Some("2026-06-22T10:25:00Z".into()),
+                per_app: vec![],
+                error: None,
+            },
+            overall: Overall::Healthy,
+        }
+    }
+
+    #[test]
+    fn json_has_expected_shape() {
+        let json = serde_json::to_string(&healthy_report()).unwrap();
+        assert!(json.contains("\"gauge\":\"9.9.9\""));
+        assert!(json.contains("\"overall\":\"healthy\""));
+        assert!(json.contains("\"reachable\":true"));
+        assert!(json.contains("\"total_events\":1200000"));
+    }
+
+    #[test]
+    fn human_panel_renders_sections_plainly() {
+        // Colour off in the test process → plain `[ok]` glyphs, no ANSI.
+        let panel = human_panel(&healthy_report());
+        let joined = panel.join("\n");
+        assert!(joined.contains("Gauge v9.9.9"));
+        assert!(joined.contains("Client"));
+        assert!(joined.contains("Server"));
+        assert!(joined.contains("[ok] present"));
+        assert!(joined.contains("3 · 1.2M events"));
+        assert!(joined.contains("[ok] healthy"));
+        assert!(!joined.contains('\x1b'), "no ANSI when colour disabled");
+    }
+
+    #[test]
+    fn human_panel_shows_data_reason_when_unavailable() {
+        let mut r = healthy_report();
+        r.data = DataStatus::unavailable("unauthenticated");
+        r.overall = Overall::Degraded;
+        let joined = human_panel(&r).join("\n");
+        assert!(joined.contains("Data:"));
+        assert!(joined.contains("unauthenticated"));
+        assert!(joined.contains("[warn] degraded"));
+    }
+
+    // Deferred from Task 4: the humanizers land here with their first
+    // production consumer (the renderer), so they never trip `dead_code`.
+    #[test]
+    fn humanizers() {
+        assert_eq!(human_count(999), "999");
+        assert_eq!(human_count(1_000), "1K");
+        assert_eq!(human_count(1_200_000), "1.2M");
+        assert_eq!(human_count(3_000_000_000), "3B");
+        assert_eq!(human_duration(30), "30s");
+        assert_eq!(human_duration(2_460), "41m");
+        assert_eq!(human_duration(7_200), "2h");
+        assert_eq!(human_duration(172_800), "2d");
+        assert_eq!(relative_time(1_000, 1_000), "just now");
+        assert_eq!(relative_time(1_000, 1_000 + 3_600), "1 hour ago");
     }
 }
