@@ -28,6 +28,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: McpCmd,
     },
+    /// Show client/server status and a data overview
+    Status {
+        /// Emit machine-readable JSON instead of the human panel
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the gauge version and exit
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -46,6 +54,13 @@ enum McpCmd {
 
 #[tokio::main]
 async fn main() {
+    // `--version` / `-V` print only the bare version, before clap dispatch.
+    let raw: Vec<String> = std::env::args().collect();
+    if raw.iter().skip(1).any(|a| a == "--version" || a == "-V") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     let cli = Cli::parse();
     let result: Result<(), Box<dyn std::error::Error>> = match cli.cmd {
         Cmd::Keys {
@@ -106,6 +121,19 @@ async fn main() {
                 gauge::mcp::server::serve(api).await
             }
             .await
+        }
+        Cmd::Status { json } => {
+            let report = gauge::status::assemble_report(gauge::config::ClientConfig::load()).await;
+            gauge::status::emit(&report, json);
+            let code = report.overall.exit_code();
+            if code != 0 {
+                std::process::exit(code);
+            }
+            Ok(())
+        }
+        Cmd::Version => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
         }
     };
     if let Err(e) = result {
