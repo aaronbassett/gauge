@@ -490,20 +490,6 @@ mod tests {
         assert_eq!(Overall::Unhealthy.exit_code(), 1);
     }
 
-    #[test]
-    fn humanizers() {
-        assert_eq!(human_count(999), "999");
-        assert_eq!(human_count(1_000), "1K");
-        assert_eq!(human_count(1_200_000), "1.2M");
-        assert_eq!(human_count(3_000_000_000), "3B");
-        assert_eq!(human_duration(30), "30s");
-        assert_eq!(human_duration(2_460), "41m");
-        assert_eq!(human_duration(7_200), "2h");
-        assert_eq!(human_duration(172_800), "2d");
-        assert_eq!(relative_time(1_000, 1_000), "just now");
-        assert_eq!(relative_time(1_000, 1_000 + 3_600), "1 hour ago");
-    }
-
     #[tokio::test]
     async fn unconfigured_is_unhealthy() {
         let report = assemble_report(Err(crate::error::ClientError::NoConfigDir)).await;
@@ -764,65 +750,14 @@ fn classify(config_loaded: bool, server: &ServerStatus, data: &DataStatus) -> Ov
     }
     Overall::Healthy
 }
-
-// ---- Humanizers ------------------------------------------------------------
-
-fn human_count(n: i64) -> String {
-    let v = n as f64;
-    if v < 1_000.0 {
-        return n.to_string();
-    }
-    let trim = |x: f64, suf: &str| {
-        if x.fract().abs() < 0.05 {
-            format!("{}{suf}", x.round() as i64)
-        } else {
-            format!("{x:.1}{suf}")
-        }
-    };
-    if v < 1_000_000.0 {
-        trim(v / 1_000.0, "K")
-    } else if v < 1_000_000_000.0 {
-        trim(v / 1_000_000.0, "M")
-    } else {
-        trim(v / 1_000_000_000.0, "B")
-    }
-}
-
-fn human_duration(secs: i64) -> String {
-    let s = secs.max(0);
-    if s < 60 {
-        format!("{s}s")
-    } else if s < 3_600 {
-        format!("{}m", s / 60)
-    } else if s < 86_400 {
-        format!("{}h", s / 3_600)
-    } else {
-        format!("{}d", s / 86_400)
-    }
-}
-
-fn relative_time(then: i64, now: i64) -> String {
-    let d = (now - then).max(0);
-    let plural = |n: i64| if n == 1 { "" } else { "s" };
-    if d < 60 {
-        "just now".to_string()
-    } else if d < 3_600 {
-        let m = d / 60;
-        format!("{m} minute{} ago", plural(m))
-    } else if d < 86_400 {
-        let h = d / 3_600;
-        format!("{h} hour{} ago", plural(h))
-    } else {
-        let days = d / 86_400;
-        format!("{days} day{} ago", plural(days))
-    }
-}
 ```
+
+> **Note (deferred to Task 5):** the humanizer helpers `human_count` / `human_duration` / `relative_time` are NOT added in this task. They have no production caller until the renderer (Task 5) uses them, so adding them here would fail `clippy -D warnings` with `dead_code` (they'd be referenced only from `#[cfg(test)]`). They — and their `humanizers` unit test — land in Task 5 alongside their first consumer.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cargo test -p gauge-client --lib status::tests`
-Expected: PASS (4 tests).
+Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -892,6 +827,22 @@ Add these tests inside the existing `#[cfg(test)] mod tests` block in `status/mo
         assert!(joined.contains("Data:"));
         assert!(joined.contains("unauthenticated"));
         assert!(joined.contains("[warn] degraded"));
+    }
+
+    // Deferred from Task 4: the humanizers land here with their first
+    // production consumer (the renderer), so they never trip `dead_code`.
+    #[test]
+    fn humanizers() {
+        assert_eq!(human_count(999), "999");
+        assert_eq!(human_count(1_000), "1K");
+        assert_eq!(human_count(1_200_000), "1.2M");
+        assert_eq!(human_count(3_000_000_000), "3B");
+        assert_eq!(human_duration(30), "30s");
+        assert_eq!(human_duration(2_460), "41m");
+        assert_eq!(human_duration(7_200), "2h");
+        assert_eq!(human_duration(172_800), "2d");
+        assert_eq!(relative_time(1_000, 1_000), "just now");
+        assert_eq!(relative_time(1_000, 1_000 + 3_600), "1 hour ago");
     }
 ```
 
@@ -972,6 +923,59 @@ fn rel_from_rfc3339(s: &str) -> String {
     match OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339) {
         Ok(dt) => relative_time(dt.unix_timestamp(), OffsetDateTime::now_utc().unix_timestamp()),
         Err(_) => s.to_string(),
+    }
+}
+
+// ---- Humanizers (deferred from Task 4 — land with their first consumer) -----
+
+fn human_count(n: i64) -> String {
+    let v = n as f64;
+    if v < 1_000.0 {
+        return n.to_string();
+    }
+    let trim = |x: f64, suf: &str| {
+        if x.fract().abs() < 0.05 {
+            format!("{}{suf}", x.round() as i64)
+        } else {
+            format!("{x:.1}{suf}")
+        }
+    };
+    if v < 1_000_000.0 {
+        trim(v / 1_000.0, "K")
+    } else if v < 1_000_000_000.0 {
+        trim(v / 1_000_000.0, "M")
+    } else {
+        trim(v / 1_000_000_000.0, "B")
+    }
+}
+
+fn human_duration(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 60 {
+        format!("{s}s")
+    } else if s < 3_600 {
+        format!("{}m", s / 60)
+    } else if s < 86_400 {
+        format!("{}h", s / 3_600)
+    } else {
+        format!("{}d", s / 86_400)
+    }
+}
+
+fn relative_time(then: i64, now: i64) -> String {
+    let d = (now - then).max(0);
+    let plural = |n: i64| if n == 1 { "" } else { "s" };
+    if d < 60 {
+        "just now".to_string()
+    } else if d < 3_600 {
+        let m = d / 60;
+        format!("{m} minute{} ago", plural(m))
+    } else if d < 86_400 {
+        let h = d / 3_600;
+        format!("{h} hour{} ago", plural(h))
+    } else {
+        let days = d / 86_400;
+        format!("{days} day{} ago", plural(days))
     }
 }
 
