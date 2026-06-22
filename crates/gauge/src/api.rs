@@ -29,7 +29,7 @@ impl TokenCache {
         Ok(())
     }
 
-    fn load() -> Option<TokenCache> {
+    pub(crate) fn load() -> Option<TokenCache> {
         let path = paths::token_path().ok()?;
         serde_json::from_slice(&std::fs::read(path).ok()?).ok()
     }

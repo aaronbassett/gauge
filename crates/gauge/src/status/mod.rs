@@ -189,7 +189,7 @@ async fn probe_server(api: &ApiClient) -> (bool, bool, Option<String>) {
 }
 
 fn token_status(user_id: &str, now: i64) -> TokenStatus {
-    let Some(cache) = read_token_cache() else {
+    let Some(cache) = TokenCache::load() else {
         return TokenStatus::absent();
     };
     let valid = cache.user_id == user_id && cache.expires_at > now;
@@ -199,13 +199,6 @@ fn token_status(user_id: &str, now: i64) -> TokenStatus {
         expires_at: Some(cache.expires_at),
         expires_in_secs: Some(cache.expires_at - now),
     }
-}
-
-/// Read `token.json` directly (the struct is public + `Deserialize`); never
-/// mints a token, so inspecting status performs no auth I/O.
-fn read_token_cache() -> Option<TokenCache> {
-    let path = paths::token_path().ok()?;
-    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
 fn data_from_meta(meta: &gauge_query::MetaResponse) -> DataStatus {
