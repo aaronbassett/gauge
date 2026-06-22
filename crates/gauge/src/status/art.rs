@@ -92,7 +92,11 @@ mod tests {
         let lines = sparkline(&[]);
         assert_eq!(lines.len(), 5, "top + 3 wave rows + bottom");
         for l in &lines {
-            assert_eq!(l.chars().count(), ART_WIDTH, "line {l:?} not ART_WIDTH wide");
+            assert_eq!(
+                l.chars().count(),
+                ART_WIDTH,
+                "line {l:?} not ART_WIDTH wide"
+            );
         }
     }
 
