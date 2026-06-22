@@ -29,7 +29,7 @@ impl TokenCache {
         Ok(())
     }
 
-    fn load() -> Option<TokenCache> {
+    pub(crate) fn load() -> Option<TokenCache> {
         let path = paths::token_path().ok()?;
         serde_json::from_slice(&std::fs::read(path).ok()?).ok()
     }
@@ -43,9 +43,16 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn from_config(cfg: &ClientConfig) -> Self {
+        Self::from_config_with_timeout(cfg, std::time::Duration::from_secs(10))
+    }
+
+    /// Like [`from_config`](Self::from_config) but with a caller-chosen request
+    /// timeout. `gauge status` uses a short timeout so the health probe stays
+    /// snappy when the server is down.
+    pub fn from_config_with_timeout(cfg: &ClientConfig, timeout: std::time::Duration) -> Self {
         Self {
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
+                .timeout(timeout)
                 .build()
                 .expect("reqwest client"),
             base: cfg.server_url.clone(),
@@ -94,6 +101,36 @@ impl ApiClient {
 
     pub async fn meta(&self) -> Result<MetaResponse, ClientError> {
         self.authed(reqwest::Method::GET, "/v1/meta", None).await
+    }
+
+    /// Unauthed liveness probe: `GET /healthz`. Ok ⇒ reachable.
+    pub async fn healthz(&self) -> Result<(), ClientError> {
+        self.get_ok("/healthz").await
+    }
+
+    /// Unauthed readiness probe: `GET /readyz` (server checks its DB). Ok ⇒
+    /// the server can serve queries.
+    pub async fn readyz(&self) -> Result<(), ClientError> {
+        self.get_ok("/readyz").await
+    }
+
+    /// Raw GET that only inspects the status line — the health endpoints reply
+    /// with a bare `ok` body, which is not JSON, so this must NOT go through
+    /// `handle` (which deserializes). Any transport error or non-2xx maps to a
+    /// `ClientError` whose `Display` is the human-readable reason.
+    async fn get_ok(&self, path: &str) -> Result<(), ClientError> {
+        let resp = self
+            .http
+            .get(format!("{}{path}", self.base))
+            .send()
+            .await
+            .map_err(|e| ClientError::Http(e.to_string()))?;
+        let status = resp.status().as_u16();
+        if (200..300).contains(&status) {
+            Ok(())
+        } else {
+            Err(ClientError::Http(format!("HTTP {status}")))
+        }
     }
 
     async fn token(&self) -> Result<String, ClientError> {

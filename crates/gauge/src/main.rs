@@ -28,6 +28,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: McpCmd,
     },
+    /// Show client/server status and a data overview
+    Status {
+        /// Emit machine-readable JSON instead of the human panel
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print the gauge version and exit
+    Version,
 }
 
 #[derive(Subcommand)]
@@ -44,8 +52,27 @@ enum McpCmd {
     Serve,
 }
 
+/// Print only the bare version (e.g. `0.3.0`) to stdout, nothing else. Shared
+/// by the `--version`/`-V` pre-parse hook and the `version` subcommand so the
+/// two can never drift.
+fn print_version() {
+    println!("{}", env!("CARGO_PKG_VERSION"));
+}
+
 #[tokio::main]
 async fn main() {
+    // Intercept `--version` / `-V` BEFORE clap dispatch so we print only the
+    // bare version (clap's native version flag would prefix it with `gauge `).
+    // Note: this matches the flag positionally anywhere in argv — fine for the
+    // current commands (no positional can legitimately be `--version`/`-V`).
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == "--version" || a == "-V")
+    {
+        print_version();
+        return;
+    }
+
     let cli = Cli::parse();
     let result: Result<(), Box<dyn std::error::Error>> = match cli.cmd {
         Cmd::Keys {
@@ -106,6 +133,19 @@ async fn main() {
                 gauge::mcp::server::serve(api).await
             }
             .await
+        }
+        Cmd::Status { json } => {
+            let report = gauge::status::assemble_report(gauge::config::ClientConfig::load()).await;
+            gauge::status::emit(&report, json);
+            let code = report.overall.exit_code();
+            if code != 0 {
+                std::process::exit(code);
+            }
+            Ok(())
+        }
+        Cmd::Version => {
+            print_version();
+            Ok(())
         }
     };
     if let Err(e) = result {
