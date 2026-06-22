@@ -52,12 +52,24 @@ enum McpCmd {
     Serve,
 }
 
+/// Print only the bare version (e.g. `0.3.0`) to stdout, nothing else. Shared
+/// by the `--version`/`-V` pre-parse hook and the `version` subcommand so the
+/// two can never drift.
+fn print_version() {
+    println!("{}", env!("CARGO_PKG_VERSION"));
+}
+
 #[tokio::main]
 async fn main() {
-    // `--version` / `-V` print only the bare version, before clap dispatch.
-    let raw: Vec<String> = std::env::args().collect();
-    if raw.iter().skip(1).any(|a| a == "--version" || a == "-V") {
-        println!("{}", env!("CARGO_PKG_VERSION"));
+    // Intercept `--version` / `-V` BEFORE clap dispatch so we print only the
+    // bare version (clap's native version flag would prefix it with `gauge `).
+    // Note: this matches the flag positionally anywhere in argv — fine for the
+    // current commands (no positional can legitimately be `--version`/`-V`).
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == "--version" || a == "-V")
+    {
+        print_version();
         return;
     }
 
@@ -132,7 +144,7 @@ async fn main() {
             Ok(())
         }
         Cmd::Version => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            print_version();
             Ok(())
         }
     };
