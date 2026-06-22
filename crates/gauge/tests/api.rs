@@ -158,3 +158,25 @@ async fn mcp_tools_call_through_to_api() {
     assert!(text.contains("42"));
     unsafe { std::env::remove_var("GAUGE_CONFIG_DIR") };
 }
+
+#[tokio::test]
+async fn healthz_ok_and_readyz_failure_are_distinguished() {
+    let _g = env_lock().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/healthz"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/readyz"))
+        .respond_with(ResponseTemplate::new(503).set_body_string("db down"))
+        .mount(&server)
+        .await;
+    let api = setup(&tmp, &server.uri());
+
+    assert!(api.healthz().await.is_ok());
+    assert!(api.readyz().await.is_err());
+    unsafe { std::env::remove_var("GAUGE_CONFIG_DIR") };
+}
