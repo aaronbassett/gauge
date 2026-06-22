@@ -341,6 +341,20 @@ The internal API layer injects the Bearer token and, on a `401`, **transparently
 re-runs the login handshake with the local key and retries once** — so long TUI
 sessions and agent conversations never break on the 1-hour token expiry.
 
+### `gauge status` and `gauge version`
+
+```console
+$ gauge status            # health panel: client config, server reachability, data overview
+$ gauge status --json     # same report as structured JSON
+$ gauge version           # prints just the version, e.g. 0.3.0
+$ gauge --version         # identical (also -V)
+```
+
+`status` is read-only and degrades gracefully: an unreachable server or missing
+credentials become fields in the report rather than errors. Exit code is `0`
+when healthy and `1` when degraded or unhealthy, so it is safe to gate scripts
+on `gauge status`.
+
 ### TUI
 
 `gauge tui` opens a configurable, themed dashboard in the `btm`/`sampler` idiom.
