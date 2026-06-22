@@ -5,5 +5,6 @@ pub mod keys;
 pub mod mcp;
 pub mod paths;
 pub mod query_cmd;
+pub mod status;
 pub mod term;
 pub mod tui;
